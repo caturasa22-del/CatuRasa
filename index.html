@@ -28,775 +28,587 @@
 <body>
 
   <script>
-    // ── Icon & suit definitions ─────────────────────────────────────
-let deck = [];
-let discardPile = [];
-let playerHand = [];
-let aiHand = [];
-let turn = "player";
-let message = "Ambil 1 kartu dari Deck atau Discard Pile";
-let suits = ["♠", "♥", "♦", "♣"];
+    let deck = [];
+    let discardPile = [];
+    let playerHand = [];
 
-let iconDist = [
-  { icon: "triangle", count: 5, score: 4  },
-  { icon: "circle",   count: 4, score: 6  },
-  { icon: "square",   count: 4, score: 10 }
-];
+    let suits = ["♠", "♥", "♦", "♣"];
 
-let BONUS_POINTS = 5; 
-let draggingCard  = null;
-let previewCard   = null;
-let draggingIndex = -1;
+    // Base card dimensions
+    let cardW, cardH;
 
-// Dynamic Card Dimension Scalers
-let cardW = 100;
-let cardH = 150;
+    let gameState = "start";
+    let instructionPage = 1;
+    let totalInstructionPages = 5;
+    let dishIcon;
+    let dessertIcon;
+    let snackIcon;
+    let iconSize;
+    let autoPreviewPhase = 0;
 
-let dealing = true;
-let dealQueue = [];
-let currentDeal = null;
-let dealSpeed = 0.15;
+    let cardImages = {};
+    let backImage;
+    let titleImage; // Added for the image title logo
 
-let leftImageTop;
-let leftImageBottom;
+    let autoPreviewMode = false;
+    let autoPreviewStep = 0;
+    let autoPreviewType = "";
 
-let aiAnimating = false;
-let aiDrawnCard = null;
-let aiDiscardedCard = null;
-let aiAnimation = null;
-let aiThinking = false;
+    let tutorialOffsetX = 0;
+    let previewCard = null;
+    let myFont2;
 
-let cardImages = {};
-let backImage;
-let revealAI   = false;
-let gameState = "playing"; 
-let myFont1;
-let myFont2;
+    // Variabel global untuk menampung file musik
+    let bgm;
 
-// Musik latar global
-let bgm;
+    // PRELOAD
+    function preload() {
+      myFont2 = loadFont('assets/font/Poppins-Medium.ttf');
 
-// ── Responsive Layout Helpers ──────────────────────────────────────────────
-function updateCardDimensions() {
-  cardH = min(height * 0.23, 160);
-  cardW = cardH * 0.66;
-}
+      // Memuat file audio Anda.
+      bgm = loadSound('assets/BGM.mp4');
 
-function deckX()    { return width / 2 - cardW - (width * 0.04); }
-function discardX() { return width / 2 + (width * 0.04);  }
-function midY()     { return height / 2 - cardH / 2; }
-function playerY()  { return height - cardH - (height * 0.08); }
-function aiY()      { return height * 0.08; }
+      // Memuat gambar logo judul pengganti teks
+      titleImage = loadImage("assets/LLOGO-06.png"); 
 
-function handStartX(hand) {
-  let spacing = cardW * 1.15;
-  let totalW = hand.length * spacing - (spacing - cardW);
-  return width / 2 - totalW / 2;
-}
+      let suitMap = { "♠": "J", "♥": "K", "♦": "S", "♣": "M" };
 
-// End-Game UI Configuration
-function getEndGameButtonsLayout() {
-  let btnW = min(width * 0.16, 180);
-  let btnH = min(height * 0.07, 50);
-  let gap = width * 0.02;
-  let totalW = (btnW * 2) + gap;
-  let startX = width / 2 - totalW / 2;
-  let y = midY() + 40; 
-  
-  return { btnW, btnH, gap, startX, y };
-}
-
-// ── Card → icon mapping ─────────────────────────────────────────
-let cardDefs = [
-  { label: "2",  icon: "triangle", score: 4  },
-  { label: "3",  icon: "triangle", score: 4  },
-  { label: "4",  icon: "triangle", score: 4  },
-  { label: "5",  icon: "triangle", score: 4  },
-  { label: "6",  icon: "triangle", score: 4  },
-  { label: "7",  icon: "circle",   score: 6  },
-  { label: "8",  icon: "circle",   score: 6  },
-  { label: "9",  icon: "circle",   score: 6  },
-  { label: "10", icon: "circle",   score: 6  },
-  { label: "A",  icon: "square",   score: 10 },
-  { label: "J",  icon: "square",   score: 10 },
-  { label: "Q",  icon: "square",   score: 10 },
-  { label: "K",  icon: "square",   score: 10 }
-];
-
-// ── Preload ─────────────────────────────────────────────────────
-function preload() {
-  myFont1 = loadFont('assets/font/SugarpunchDEMO.otf');
-  myFont2 = loadFont('assets/font/Poppins-Medium.ttf');
-  
-  leftImageTop = loadImage("assets/cards/Points.png");
-  leftImageBottom = loadImage("assets/cards/Point charts.png");
-
-  // Memuat file audio BGM
-  bgm = loadSound('assets/BGM.mp4');
-
-  let suitMap = { "♠": "J", "♥": "K", "♦": "S", "♣": "M" };
-
-  for (let suit of suits) {
-    for (let def of cardDefs) {
-      let key      = def.label + suit;
-      let filename = def.label + suitMap[suit] + ".png";
-      cardImages[key] = loadImage("assets/cards/" + filename);
-    }
-  }
-
-  backImage = loadImage("assets/cards/BG.png");
-}
-
-// ── Setup & Window Resizing ───────────────────────────────────────────────────────
-function setup() {
-  createCanvas(windowWidth, windowHeight);
-  clear();
-  updateCardDimensions();
-  textFont(myFont2);
-  pixelDensity(4);
-  
-  // PERUBAHAN: Musik diputar selalu dari awal (detik 0) saat game dimulai
-  bgm.loop();
-  bgm.setVolume(0.3); 
-
-  // Menghapus data memori pelacakan waktu audio lama agar bersih
-  localStorage.removeItem('bgmTime');
-
-  initGameAssets(); 
-}
-
-function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
-  updateCardDimensions();
-}
-
-function initGameAssets() {
-  deck        = [];
-  discardPile = [];
-  playerHand  = [];
-  aiHand      = [];
-
-  revealAI = false;
-  turn     = "player";
-  message  = "Ambil 1 kartu dari Deck atau Discard Pile";
-
-  createDeck();
-  shuffleDeck();
-
-  dealing     = true;
-  dealQueue   = [];
-  currentDeal = null;
-
-  prepareDeal();
-  discardPile.push(deck.pop());
-
-  gameState = "playing";
-}
-
-// ── Deck creation ───────────────────────────────────────────────
-function createDeck() {
-  deck = [];
-  for (let suit of suits) {
-    for (let def of cardDefs) {
-      let key = def.label + suit;
-      deck.push({
-        suit,
-        label: def.label,
-        icon:  def.icon,
-        score: def.score,
-        img:   cardImages[key],
-        x: 0,
-        y: 0
-      });
-    }
-  }
-}
-
-function shuffleDeck() {
-  for (let i = deck.length - 1; i > 0; i--) {
-    let j = floor(random(i + 1));
-    [deck[i], deck[j]] = [deck[j], deck[i]];
-  }
-}
-
-// ── Score calculation ───────────────────────────────────────────
-function calculateScore(hand) {
-  let suitScores = { "♠": 0, "♥": 0, "♦": 0, "♣": 0 };
-
-  for (let card of hand) {
-    suitScores[card.suit] += card.score;
-  }
-
-  if (hand.length === 4) {
-    let first   = hand[0];
-    let allSame = hand.every(c => c.suit === first.suit && c.icon === first.icon);
-    if (allSame) {
-      suitScores[first.suit] += BONUS_POINTS;
-    }
-  }
-
-  return max(
-    suitScores["♠"],
-    suitScores["♥"],
-    suitScores["♦"],
-    suitScores["♣"]
-  );
-}
-
-function getSuitScore(hand, suit) {
-  let total = 0;
-  for (let card of hand) if (card.suit === suit) total += card.score;
-  return total;
-}
-
-// ── Win condition ───────────────────────────────────────────────
-function checkFinalWinner() {
-  revealAI = true;
-  let playerScore = calculateScore(playerHand);
-  let aiScore     = calculateScore(aiHand);
-
-  if (playerScore > aiScore)
-    message = "KAMU MENANG! " + playerScore + " vs " + aiScore;
-  else if (aiScore > playerScore)
-    message = "AI MENANG! " + aiScore + " vs " + playerScore;
-  else
-    message = "DRAW! " + playerScore + " poin";
-
-  gameState = "gameover";
-  turn = "none";
-}
-
-// ── Draw loop ───────────────────────────────────────────────────
-function draw() {
-  clear();
-
-  drawLeftImages();
-
-  drawDeck();
-  drawDiscard();
-
-  if (!dealing) {
-    drawPlayerHand();
-    drawAIHand();
-  }
-
-  animateDeal();
-  drawUI();
-
-  if (dealing) return;
-
-  if (turn === "ai" && !aiAnimating) {
-    aiAnimating = true;
-    turn = "waiting";
-    setTimeout(aiTurn, 700);
-  }
-
-  if (aiDrawnCard) {
-    drawCard(
-      aiDrawnCard,
-      width / 2 + (width * 0.15),
-      aiY() + 40,
-      true
-    );
-  }
-
-  if (aiDiscardedCard) {
-    drawCard(
-      aiDiscardedCard,
-      discardX(),
-      midY() - 30,
-      true
-    );
-  }
-
-  if (previewCard && (gameState === "playing" || gameState === "gameover")) {
-    drawPreviewCard();
-  }
-
-  if (draggingCard) {
-    drawCard(
-      draggingCard,
-      mouseX - cardW / 2,
-      mouseY - cardH / 2,
-      true
-    );
-  }
-  if (aiAnimation) {
-    let x = lerp(
-      aiAnimation.startX,
-      aiAnimation.endX,
-      aiAnimation.progress
-    );
-
-    let y = lerp(
-      aiAnimation.startY,
-      aiAnimation.endY,
-      aiAnimation.progress
-    );
-
-    drawCard(
-      aiAnimation.card,
-      x,
-      y,
-      aiAnimation.faceUp
-    );
-
-    aiAnimation.progress += 0.08;
-
-    if (aiAnimation.progress >= 1) {
-      finishAIAnimation();
-    }
-  }
-}
-
-// ── Card preview (bottom-right) ─────────────────────────────────
-function drawPreviewCard() {
-  let bigW = cardW * 3;
-  let bigH = cardH * 3;
-  let x = width - bigW - (width * 0.03);
-  let y = height / 2 - bigH / 2;
-
-  drawingContext.shadowColor = "rgba(0,0,0,0.75)";
-  drawingContext.shadowBlur = 45;
-  drawingContext.shadowOffsetX = 18;
-  drawingContext.shadowOffsetY = 22;
-
-  image(previewCard.img, x, y, bigW, bigH);
-
-  drawingContext.shadowColor = "transparent";
-}
-
-// ── Left Side Layout Images ─────────────────────────────────────
-function drawLeftImages() {
-  let maxPanelH = height * 0.46;
-  
-  let topW = leftImageTop.width * (maxPanelH / leftImageTop.height);
-  image(leftImageTop, width * 0.02, height * 0.05, topW, maxPanelH);
-
-  let bottomW = leftImageBottom.width * (maxPanelH / leftImageBottom.height);
-  image(leftImageBottom, width * 0.02, height * 0.52, bottomW, maxPanelH);
-}
-
-// ── Deal animation ──────────────────────────────────────────────
-function prepareDeal() {
-  for (let i = 0; i < 4; i++) {
-    dealQueue.push({ target: "player", card: deck.pop() });
-    dealQueue.push({ target: "ai",     card: deck.pop() });
-  }
-}
-
-// ── Card rendering ──────────────────────────────────────────────
-function animateDeal() {
-  let spacing = cardW * 1.15;
-  if (!currentDeal && dealQueue.length > 0) {
-    let next = dealQueue.shift();
-    currentDeal = { card: next.card, target: next.target, progress: 0 };
-  }
-
-  if (currentDeal) {
-    let targetX, targetY;
-
-    if (currentDeal.target === "player") {
-      targetX = handStartX(playerHand) + playerHand.length * spacing;
-      targetY = playerY();
-    } else {
-      targetX = handStartX(aiHand) + aiHand.length * spacing;
-      targetY = aiY();
+      for (let suit of suits) {
+        for (let value = 1; value <= 13; value++) {
+          let label = getLabel(value);
+          let filename = label + suitMap[suit] + ".png";
+          cardImages[label + suit] = loadImage("assets/cards/" + filename);
+        }
+      }
+      dishIcon = loadImage("assets/cards/icon_dish.png");
+      dessertIcon = loadImage("assets/cards/icon_dessert.png");
+      snackIcon = loadImage("assets/cards/icon_snack.png");
+      backImage = loadImage("assets/cards/BG.png");
     }
 
-    currentDeal.progress += dealSpeed;
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+      calculateResponsiveSizes();
+      textFont(myFont2);
 
-    let x = lerp(deckX(), targetX, currentDeal.progress);
-    let y = lerp(midY(),  targetY, currentDeal.progress);
-
-    drawCard(currentDeal.card, x, y, currentDeal.target === "player");
-
-    if (currentDeal.progress >= 1) {
-      if (currentDeal.target === "player") playerHand.push(currentDeal.card);
-      else                                 aiHand.push(currentDeal.card);
-      currentDeal = null;
+      // Setel musik agar berputar terus (loop) dan atur volumenya (0.0 sampai 1.0)
+      bgm.loop();
+      bgm.setVolume(0.3); 
     }
-  }
 
-  if (!currentDeal && dealQueue.length === 0) dealing = false;
-}
-
-function drawCard(card, x, y, faceUp = true) {
-  drawingContext.shadowColor = "rgba(0,0,0,0.6)";
-  drawingContext.shadowBlur = 18;
-  drawingContext.shadowOffsetX = 8;
-  drawingContext.shadowOffsetY = 10;
-
-  if (faceUp) image(card.img, x, y, cardW, cardH);
-  else          image(backImage, x, y, cardW, cardH);
-
-  drawingContext.shadowColor = "transparent";
-}
-
-function drawPlayerHand() {
-  let startX = handStartX(playerHand);
-  let y      = playerY();
-  let spacing = cardW * 1.15;
-
-  for (let i = 0; i < playerHand.length; i++) {
-    if (i === draggingIndex) continue;
-
-    let x = startX + i * spacing;
-    let c = playerHand[i];
-    c.x   = x;
-    c.y   = y;
-
-    let hovering = mouseX > x && mouseX < x + cardW && mouseY > y && mouseY < y + cardH;
-
-    if (hovering) {
-      let zoom = 1.15;
-      let newW = cardW * zoom, newH = cardH * zoom;
-      image(c.img, x - (newW - cardW) / 2, y - (newH - cardH) / 2, newW, newH);
-    } else {
-      drawCard(c, x, y, true);
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+      calculateResponsiveSizes();
     }
-  }
-}
 
-function drawAIHand() {
-  let startX = handStartX(aiHand);
-  let spacing = cardW * 1.15;
-  for (let i = 0; i < aiHand.length; i++) {
-    drawCard(aiHand[i], startX + i * spacing, aiY(), revealAI);
-  }
-}
-
-// ── Deck & discard rendering ────────────────────────────────────
-function drawDeck() {
-  let x = deckX();
-  let y = midY();
-
-  drawingContext.shadowColor = "rgba(0,0,0,0.65)";
-  drawingContext.shadowBlur = 25;
-  drawingContext.shadowOffsetX = 10;
-  drawingContext.shadowOffsetY = 12;
-
-  image(backImage, x, y, cardW, cardH);
-
-  drawingContext.shadowColor = "transparent";
-
-  fill(255);
-  textAlign(CENTER);
-  textSize(14);
-  text(deck.length, x + cardW / 2, y + cardH + 18);
-}
-
-function drawDiscard() {
-  if (discardPile.length > 0)
-    drawCard(discardPile[discardPile.length - 1], discardX(), midY(), true);
-
-  noFill();
-  stroke(255);
-  rect(discardX(), midY(), cardW, cardH);
-  noStroke();
-}
-
-function checkInstantWin() {
-  let playerScore = calculateScore(playerHand);
-  let aiScore = calculateScore(aiHand);
-
-  if (playerScore >= 45) {
-    revealAI = true;
-    message = "KAMU MENANG! (45 poin tercapai)";
-    gameState = "gameover";
-    turn = "none";
-    return true;
-  }
-
-  if (aiScore >= 45) {
-    revealAI = true;
-    message = "AI MENANG! (45 poin tercapai)";
-    gameState = "gameover";
-    turn = "none";
-    return true;
-  }
-
-  return false;
-}
-
-// ── UI text ────────────────────────────────────────────────────
-function drawUI() {
-  fill(255);
-  textAlign(CENTER);
-  textSize(min(width * 0.018, 20));
-  text(message, width / 2, midY() - 25);
-
-  textSize(15);
-  text("Poin Kamu: " + calculateScore(playerHand), width / 2, playerY() + cardH + 20);
-  text("Poin AI: "    + calculateScore(aiHand),     width / 2, aiY() - 15);
-
-  if (playerHand.length === 4) {
-    let first   = playerHand[0];
-    let allSame = playerHand.every(c => c.suit === first.suit && c.icon === first.icon);
-    if (allSame) {
-      fill(255, 220, 50);
-      textSize(16);
-      text("✦ BONUS +5!", width / 2, playerY() + cardH + 42);
+    function calculateResponsiveSizes() {
+      cardH = height * 0.25;
+      cardW = cardH * (100 / 150); 
+      iconSize = cardH * 0.8; 
     }
-  }
 
-  // Render Post-Game Navigation Buttons
-  if (gameState === "gameover") {
-    let layout = getEndGameButtonsLayout();
-    textAlign(CENTER, CENTER);
-    textFont(myFont2);
-    textSize(min(width * 0.014, 16));
+    // DRAW LOOP
+    function draw() {
+      background(20, 120, 70);
 
-    // Retry Button ("Main Lagi")
-    fill(230);
-    rect(layout.startX, layout.y, layout.btnW, layout.btnH, 12);
-    fill(0);
-    text("Main Lagi", layout.startX + layout.btnW / 2, layout.y + layout.btnH / 2);
+      if (gameState === "start") {
+        drawStartScreen();
+        return;
+      }
 
-    // Main Menu Button ("Menu Utama")
-    fill(230);
-    rect(layout.startX + layout.btnW + layout.gap, layout.y, layout.btnW, layout.btnH, 12);
-    fill(0);
-    text("Menu Utama", layout.startX + layout.btnW + layout.gap + layout.btnW / 2, layout.y + layout.btnH / 2);
-  }
-}
+      if (gameState === "menu") {
+        drawMenuScreen();
+        return;
+      }
 
-// ── Mouse input ─────────────────────────────────────────────────
-function mousePressed() {
-  if (getAudioContext().state !== 'running') {
-    getAudioContext().resume();
-  }
+      if (gameState === "instructions") { 
+        drawInstructionsScreen();
 
-  // Handle Menu Actions on Game Over
-  if (gameState === "gameover") {
-    let layout = getEndGameButtonsLayout();
+        if (previewCard) {
+          drawPreviewCard();
+        }
+        if (autoPreviewMode) {
+          drawBottomCardTutorial();
+        }
+        return;
+      }
+    }
 
-    // Clicked "Main Lagi" (Mulai game baru, musik restart otomatis)
-    if (mouseX > layout.startX && mouseX < layout.startX + layout.btnW &&
-        mouseY > layout.y && mouseY < layout.y + layout.btnH) {
+    function drawStartScreen() {
+      clear();
+
+      // Menghitung ukuran logo gambar secara responsif berdasarkan tinggi layar
+      let titleH = height * 0.18; // Mengatur tinggi logo relatif terhadap layar (bisa disesuaikan)
       
-      bgm.stop(); // Hentikan audio lama
-      bgm.loop(); // Putar ulang lagu dari detik 0
-      initGameAssets();
-      return;
+      // === OTOMATIS: Lebar mengikuti proporsi tinggi gambar asli tanpa hardcode ===
+      let titleW = titleH * (titleImage.width / titleImage.height); 
+      
+      // Memposisikan logo di tengah layar secara horizontal dan vertical yang seimbang
+      let titleX = width / 2 - titleW / 2;
+      let titleY = height * 0.25; 
+      
+      // Menggambar logo judul
+      image(titleImage, titleX, titleY, titleW, titleH);
+
+      // Tombol Mulai Permainan
+      let btnW = width * 0.25;
+      let btnH = height * 0.1;
+      let btnX = width / 2 - btnW / 2;
+      let btnY = height * 0.55;
+      
+      fill(200);
+      rect(btnX, btnY, btnW, btnH, 20);
+
+      fill(0);
+      textSize(height * 0.035);
+      textAlign(CENTER, CENTER);
+      text("Mulai Permainan", width / 2, btnY + btnH / 2);
     }
 
-    // Clicked "Menu Utama" (Kembali ke halaman index.html)
-    if (mouseX > layout.startX + layout.btnW + layout.gap && mouseX < layout.startX + layout.btnW * 2 + layout.gap &&
-        mouseY > layout.y && mouseY < layout.y + layout.btnH) {
-      
-      // PERUBAHAN: Bersihkan localStorage agar menu utama tetap sunyi
-      localStorage.removeItem('bgmTime');
-      window.location.href = "first.html"; 
-      return;
+    function drawMenuScreen() {
+      clear();
+
+      let w = width * 0.18;
+      let h = height * 0.12;
+      let gap = width * 0.03;
+
+      let totalW = w * 2 + gap;
+      let startX = width / 2 - totalW / 2;
+      let y = height / 2 - h / 2;
+
+      textAlign(CENTER, CENTER);
+      textSize(height * 0.035);
+
+      // LEFT button (Tutorial)
+      fill(200);
+      rect(startX, y, w, h, 15);
+      fill(0);
+      text("Tutorial", startX + w / 2, y + h / 2);
+
+      // RIGHT button (Mulai)
+      let rightBtnX = startX + w + gap;
+      fill(200);
+      rect(rightBtnX, y, w, h, 15);
+      fill(0);
+      text("Mulai", rightBtnX + w / 2, y + h / 2);
     }
-  }
 
-  if (dealing)          return;
-  if (turn !== "player") return;
+    function drawInstructionsScreen() {
+      clear();
 
-  // Click deck
-  if (mouseX > deckX() && mouseX < deckX() + cardW &&
-      mouseY > midY()   && mouseY < midY() + cardH) {
-    if (deck.length === 0) { checkFinalWinner(); return; }
-    if (playerHand.length >= 5) { message = "Buang 1 kartu dulu!"; return; }
-    playerHand.push(deck.pop());
-    message = "Buang 1 kartu";
-    return;
-  }
+      fill(255);
+      textAlign(CENTER, TOP);
+      textSize(height * 0.06);
+      text("Peraturan Bermain", width / 2 + tutorialOffsetX, height * 0.08);
 
-  // Click discard pile
-  if (mouseX > discardX() && mouseX < discardX() + cardW &&
-      mouseY > midY()      && mouseY < midY() + cardH) {
-    if (discardPile.length === 0) return;
-    if (playerHand.length >= 5)   { message = "Buang 1 kartu dulu!"; return; }
-    playerHand.push(discardPile.pop());
-    message = "Buang 1 kartu";
-    return;
-  }
-
-  // Start dragging a card from hand
-  for (let i = 0; i < playerHand.length; i++) {
-    let c = playerHand[i];
-    if (mouseX > c.x && mouseX < c.x + cardW &&
-        mouseY > c.y && mouseY < c.y + cardH) {
-      
-      previewCard = c;
-      
-      if (playerHand.length < 5) {
-        message = "Ambil 1 kartu terlebih dahulu!";
-        draggingCard = null;
-        draggingIndex = -1;
+      if (previewCard) {
+        tutorialOffsetX = lerp(tutorialOffsetX, -width * 0.15, 0.1);
       } else {
-        draggingCard  = c;
-        draggingIndex = i;
+        tutorialOffsetX = lerp(tutorialOffsetX, 0, 0.1);
       }
-      break;
-    }
-  }
-}
+      
+      let textY = height * 0.22;
+      let contentSize = height * 0.03;
+      textSize(contentSize);
 
-function mouseReleased() {
-  if (dealing)       return;
-  if (!draggingCard) return;
-
-  if (mouseX > discardX() && mouseX < discardX() + cardW &&
-      mouseY > midY()      && mouseY < midY() + cardH) {
-    discardPile.push(draggingCard);
-    playerHand.splice(draggingIndex, 1);
-    turn    = "ai";
-    message = "Giliran AI";
-  }
-
-  draggingCard  = null;
-  draggingIndex = -1;
-}
-
-// ── AI Animation Handlers ───────────────────────────────────────────────────
-function startAIAnimation(card, startX, startY, endX, endY, action, faceUp = true) {
-  aiAnimation = { card, startX, startY, endX, endY, progress: 0, action, faceUp };
-}
-
-function finishAIAnimation() {
-  if (aiAnimation.action === "draw") {
-    aiHand.push(aiAnimation.card);
-    let drawnCard = aiAnimation.card;
-    aiAnimation = null;
-
-    setTimeout(() => {
-      aiDiscardStep(drawnCard);
-    }, 500);
-
-  } else if (aiAnimation.action === "discard") {
-    discardPile.push(aiAnimation.card);
-    aiAnimation = null;
-
-    if (checkInstantWin()) {
-      aiAnimating = false;
-      return;
+      // === PAGE CONTENT ===
+      if (instructionPage === 1) {
+        text("Caturasa merupakan permainan kartu dimana tujuan pemain adalah \n" + "mengumpulkan makanan dari wilayah yang sama untuk memperoleh poin tertinggi. ", width / 2, textY);
+      } 
+      else if (instructionPage === 2) {
+        text("Dalam 1 deck Caturasa ada total 52 kartu", width / 2, textY);
+      }
+      else if (instructionPage === 3) {
+        text("Dari 52 kartu tersebut terbagi menjadi 4 kategori yang \n" + "mewakili beberapa daerah di Indonesia (klik kartu untuk memperbesar gambar)", width / 2 + tutorialOffsetX, textY);
+        drawCategoryCards();
+      }
+      else if (instructionPage === 4) {
+        text("Dalam 1 kategori terdapat 13 kartu dengan 3 jenis \n" +  "simbol yang berbeda (klik kartu untuk memperbesar gambar)", width / 2 + tutorialOffsetX, textY);
+        drawIconCards();
+      }
+      else if (instructionPage === 5) {
+        text("Simbol-simbol tersebut melambangkan jenis\n"+ "makanan yang terdapat dalam kartu.", width / 2, textY);
+        drawIconSymbol();
+      }
+      
+      // === BUTTONS ===
+      drawInstructionButtons();
     }
 
-    setTimeout(() => {
-      turn = "player";
-      aiThinking = false;
-      aiAnimating = false;
-      message = "Ambil 1 kartu dari Deck atau Discard Pile";
-    }, 500);
-  }
-}
+    function drawCategoryCards() {
+      let y = height * 0.4;
+      let spacing = width * 0.02;
+      let totalWidth = cardW * 4 + spacing * 3;
+      let startX = width / 2 - totalWidth / 2 + tutorialOffsetX;
+      let suitKeys = ["A♠", "A♥", "A♦", "A♣"];
+      let names = ["Jawa", "Kalimantan", "Sumatra", "Modern"];
 
-function aiDiscardStep() {
-  let worstIndex = findWorstCard(aiHand);
-  let discardCard = aiHand[worstIndex];
-  let spacing = cardW * 1.15;
-  let startX = handStartX(aiHand) + worstIndex * spacing;
-  let startY = aiY();
+      for (let i = 0; i < 4; i++) {
+        let x = startX + i * (cardW + spacing);
+        let hovering = mouseX > x && mouseX < x + cardW && mouseY > y && mouseY < y + cardH;
 
-  aiHand.splice(worstIndex, 1);
-  message = "AI membuang kartu...";
+        if (hovering) {
+          let zoom = 1.15;
+          let newW = cardW * zoom, newH = cardH * zoom;
+          image(cardImages[suitKeys[i]], x - (newW - cardW) / 2, y - (newH - cardH) / 2, newW, newH);
+        } else {
+          image(cardImages[suitKeys[i]], x, y, cardW, cardH);
+        }
+      }
 
-  startAIAnimation(
-    discardCard,
-    startX,
-    startY,
-    discardX(),
-    midY(),
-    "discard"
-  );
-}
-
-// ── AI Logic ────────────────────────────────────────────────────
-function aiTurn() {
-  if (deck.length === 0 && discardPile.length === 0) {
-    checkFinalWinner();
-    return;
-  }
-
-  let topDiscard = discardPile[discardPile.length - 1];
-  let bestSuit = getBestSuit(aiHand);
-  let takeDiscard = false;
-
-  if (topDiscard) {
-    let simulatedHand = [...aiHand, topDiscard];
-    let improvesScore = getSuitScore(simulatedHand, bestSuit) > getSuitScore(aiHand, bestSuit);
-    let getsBonus = wouldCompleteBonus(aiHand, topDiscard);
-
-    if (improvesScore || getsBonus) {
-      takeDiscard = true;
-    }
-  }
-
-  let drawnCard;
-  let startX;
-  let startY;
-
-  if (takeDiscard && discardPile.length > 0) {
-    drawnCard = discardPile.pop();
-    startX = discardX();
-    startY = midY();
-  } else {
-    drawnCard = deck.pop();
-    startX = deckX();
-    startY = midY();
-  }
-
-  message = "AI mengambil kartu...";
-  let faceUp = takeDiscard;
-  let spacing = cardW * 1.15;
-
-  startAIAnimation(
-    drawnCard,
-    startX,
-    startY,
-    handStartX(aiHand) + aiHand.length * spacing,
-    aiY(),
-    "draw",
-    faceUp
-  );
-}
-
-function wouldCompleteBonus(hand, candidate) {
-  if (hand.length !== 3) return false;
-  return hand.every(c => c.suit === candidate.suit && c.icon === candidate.icon);
-}
-
-function getBestSuit(hand) {
-  let suitScores = { "♠": 0, "♥": 0, "♦": 0, "♣": 0 };
-  for (let card of hand) {
-    suitScores[card.suit] += card.score;
-  }
-
-  let bestSuit = suits[0];
-  for (let suit of suits) {
-    if (suitScores[suit] > suitScores[bestSuit]) {
-      bestSuit = suit;
-    }
-  }
-  return bestSuit;
-}
-
-function findWorstCard(hand) {
-  let bestSuit = getBestSuit(hand);
-  let worstIndex = -1;
-  let lowestScore = 999;
-
-  for (let i = 0; i < hand.length; i++) {
-    if (hand[i].suit !== bestSuit && hand[i].score < lowestScore) {
-      lowestScore = hand[i].score;
-      worstIndex = i;
-    }
-  }
-
-  if (worstIndex === -1) {
-    worstIndex = 0;
-    for (let i = 1; i < hand.length; i++) {
-      if (hand[i].score < hand[worstIndex].score) {
-        worstIndex = i;
+      textSize(height * 0.025);
+      textAlign(CENTER, TOP);
+      fill(255);
+      for (let i = 0; i < 4; i++) {
+        text(names[i], startX + i * (cardW + spacing) + cardW / 2, y + cardH + height * 0.02);
       }
     }
-  }
-  return worstIndex;
-}
+
+    function drawIconCards() {
+      let y = height * 0.4;
+      let spacing = width * 0.02;
+
+      let suitKeys = ["A♠", "7♠", "6♠"];
+      let names = ["10 Poin", "6 Poin", "4 Poin"];
+
+      let totalWidth = cardW * suitKeys.length + spacing * (suitKeys.length - 1);
+      let startX = width / 2 - totalWidth / 2 + tutorialOffsetX;
+
+      for (let i = 0; i < suitKeys.length; i++) {
+        let x = startX + i * (cardW + spacing);
+        let hovering = mouseX > x && mouseX < x + cardW && mouseY > y && mouseY < y + cardH;
+
+        if (hovering) {
+          let zoom = 1.15;
+          let newW = cardW * zoom, newH = cardH * zoom;
+          image(cardImages[suitKeys[i]], x - (newW - cardW) / 2, y - (newH - cardH) / 2, newW, newH);
+        } else {
+          image(cardImages[suitKeys[i]], x, y, cardW, cardH);
+        }
+      }
+
+      textSize(height * 0.025);
+      textAlign(CENTER, TOP);
+      fill(255);
+
+      for (let i = 0; i < suitKeys.length; i++) {
+        text(names[i], startX + i * (cardW + spacing) + cardW / 2, y + cardH + height * 0.02);
+      }
+    }
+
+    function drawIconSymbol() {
+      let y = height * 0.4;
+      let spacing = width * 0.04;
+
+      let icons = [dishIcon, dessertIcon, snackIcon];
+      let names = [
+        "Makanan Berat\n" + "10 Poin",
+        "Minuman dan \n" + "makanan penutup\n" + "6 Poin",
+        "Makanan Ringan\n" + "4 Poin",
+      ];
+
+      let totalWidth = iconSize * icons.length + spacing * (icons.length - 1);
+      let startX = width / 2 - totalWidth / 2 + tutorialOffsetX;
+
+      for (let i = 0; i < icons.length; i++) {
+        let x = startX + i * (iconSize + spacing);
+        let hovering = mouseX > x && mouseX < x + iconSize && mouseY > y && mouseY < y + iconSize;
+
+        if (hovering) {
+          let zoom = 1.15;
+          let newSize = iconSize * zoom;
+          image(icons[i], x - (newSize - iconSize) / 2, y - (newSize - iconSize) / 2, newSize, newSize);
+        } else {
+          image(icons[i], x, y, iconSize, iconSize);
+        }
+      }
+
+      textSize(height * 0.023);
+      textAlign(CENTER, TOP);
+      fill(255);
+
+      for (let i = 0; i < icons.length; i++) {
+        let textX = startX + i * (iconSize + spacing) + iconSize / 2;
+        text(names[i], textX, y + iconSize + height * 0.02);
+      }
+    }
+
+    function drawInstructionButtons() {
+      let w = width * 0.15;
+      let h = height * 0.08;
+      let y = height * 0.85;
+      let gap = width * 0.03;
+
+      let totalW = w * 2 + gap;
+      let startX = width / 2 - totalW / 2 + tutorialOffsetX;
+
+      textAlign(CENTER, CENTER);
+      textSize(height * 0.028);
+
+      // BACK button
+      if (instructionPage > 1) {
+        fill(200);
+        rect(startX, y, w, h, 15);
+        fill(0);
+        text("Kembali", startX + w / 2, y + h / 2);
+      } else if (instructionPage === 1) {
+        // Draw back button to menu when on first page
+        fill(200);
+        rect(startX, y, w, h, 15);
+        fill(0);
+        text("Menu", startX + w / 2, y + h / 2);
+      }
+
+      // NEXT button
+      let nextX = startX + w + gap;
+      fill(200);
+      rect(nextX, y, w, h, 15);
+
+      fill(0);
+      if (instructionPage < totalInstructionPages) {
+        text("Lanjut", nextX + w / 2, y + h / 2);
+      } else {
+        text("Mulai", nextX + w / 2, y + h / 2);
+      }
+    }
+
+    function drawPreviewCard() {
+      let bigW = cardW * 3;
+      let bigH = cardH * 3;
+      let x = width - bigW - width * 0.05;
+      let y = height / 2 - bigH / 2;
+      image(previewCard.img, x, y, bigW, bigH);
+    }
+
+    function drawBottomCardTutorial() {
+      let bigW = cardW * 3;
+      let bigH = cardH * 3;
+      let x = width - bigW - width * 0.05;
+      let y = height / 2 - bigH / 2;
+
+      fill(0, 0, 0, 180);
+      noStroke();
+      rect(0, 0, width, height);
+
+      image(previewCard.img, x, y, bigW, bigH);
+
+      noFill();
+      stroke(255, 0, 0);
+      strokeWeight(5);
+
+      if (autoPreviewType === "top") {
+        rect(x + bigW * 0.05, y + bigH * 0.68, bigW * 0.9, bigH * 0.28, 15);
+      }
+      else if (autoPreviewType === "middle") {
+        rect(x + bigW * 0.05, y + bigH * 0.59, bigW * 0.9, bigH * 0.1, 15);
+      }  
+      else if (autoPreviewType === "bottom") {
+        rect(x + bigW * 0.04, y + bigH * 0.13, bigW * 0.23, bigH * 0.15, 15);
+      }
+
+      let txt = "";
+
+      if (autoPreviewType === "top") {
+        if (autoPreviewStep === 0) txt = "Asal daerah dari makanan tersebut dapat dilihat di bagian bawah kartu.";
+        else if (autoPreviewStep === 1) txt = "Wilayah tersebut ditunjukkan oleh bagian berwarna pada peta Indonesia";
+        else if (autoPreviewStep === 2) txt = "Masing-masing daerah juga memiliki warna yang berbeda";
+      }
+      else if (autoPreviewType === "middle") {
+        if (autoPreviewStep === 0) txt = "Terdapat informasi di bawah ilustrasi kartu";
+        else if (autoPreviewStep === 1) txt = "Informasi tersebut berada di dalam kotak berwarna";
+        else if (autoPreviewStep === 2) txt = "Tercantum bahan utama makanan, rasa dominan, dan asal daerahmakanan tersebut";
+      }
+      else if (autoPreviewType === "bottom") {
+        if (autoPreviewStep === 0) txt = "Simbol dapat dilihat di bagian pojok kiri kartu";
+        else if (autoPreviewStep === 1) txt = "Setiap simbol mengkategorikan jenis makanan yang berbeda";
+        else if (autoPreviewStep === 2) txt = "Simbol tersebut juga memiliki jumlah poin yang berbeda";
+      }
+
+      drawAutoPreviewBox(txt, x);
+    }
+
+    function drawAutoPreviewBox(txt, cardX) {
+      let w = width * 0.32;
+      let h = height * 0.24;
+      
+      let gap = width * 0.02;
+      let x = cardX - w - gap;
+      let y = height / 2 - h / 2;
+
+      fill(255);
+      noStroke();
+      rect(x, y, w, h, 20);
+
+      fill(0);
+      textAlign(LEFT, TOP);
+      textSize(height * 0.026);
+      text(txt, x + 20, y + 20, w - 40);
+
+      fill(120);
+      textSize(height * 0.018);
+      text("Klik dimana saja untuk lanjut", x + 20, y + h - 35);
+    }
+
+    // ================= INPUT =================
+    function mousePressed() {
+      // Menangani Autoplay Policy dari Browser Modern.
+      if (getAudioContext().state !== 'running') {
+        getAudioContext().resume();
+      }
+
+      if (gameState === "start") {
+        gameState = "menu";
+        return;
+      }
+
+      if (gameState === "menu") {
+        let w = width * 0.18;
+        let h = height * 0.12;
+        let gap = width * 0.03;
+        let totalW = w * 2 + gap;
+        let startX = width / 2 - totalW / 2;
+        let y = height / 2 - h / 2;
+
+        // Klik tombol Tutorial
+        if (mouseX > startX && mouseX < startX + w && mouseY > y && mouseY < y + h) {
+          gameState = "instructions";
+          instructionPage = 1;
+          return;
+        }
+
+        // Klik tombol Mulai di Menu Screen
+        if (mouseX > startX + w + gap && mouseX < startX + w + gap + w && mouseY > y && mouseY < y + h) {
+          window.location.href = "tutorinter.html";
+          return;
+        }
+      }
+
+      if (gameState === "instructions") {
+        if (autoPreviewMode) {
+          autoPreviewStep++;
+          if (autoPreviewStep > 2) {
+            if (instructionPage === 3 && autoPreviewPhase === 0) {
+              autoPreviewPhase = 1;
+              autoPreviewStep = 0;
+              autoPreviewType = "middle";
+              return;
+            }
+            autoPreviewMode = false;
+            previewCard = null;
+            instructionPage++;
+            return;
+          }
+          return;
+        }
+        
+        let w = width * 0.15;
+        let h = height * 0.08;
+        let y = height * 0.85;
+        let gap = width * 0.03;
+        let clickedCard = null;
+        
+        if (instructionPage === 3) {
+          clickedCard = getClickedCategoryCard(mouseX, mouseY);
+        }
+        else if (instructionPage === 4) {
+          clickedCard = getClickedIconCard(mouseX, mouseY);
+        }
+
+        if (clickedCard) {
+          if (previewCard && previewCard.img === clickedCard.img) {
+            previewCard = null;
+          } else {
+            previewCard = clickedCard;
+          }
+          return;
+        }
+        
+        let totalW = w * 2 + gap;
+        let startX = width / 2 - totalW / 2 + tutorialOffsetX;
+        let backX = startX;
+        let nextX = startX + w + gap;
+
+        // BACK button interaction
+        if (mouseX > backX && mouseX < backX + w && mouseY > y && mouseY < y + h) {
+          if (instructionPage > 1) {
+            instructionPage--;
+          } else {
+            gameState = "menu";
+          }
+          previewCard = null;
+          return;
+        }      
+
+        // NEXT / START button interaction
+        if (mouseX > nextX && mouseX < nextX + w && mouseY > y && mouseY < y + h) {
+          if (instructionPage === 3) {
+            autoPreviewMode = true;
+            previewCard = { img: cardImages["A♠"] };
+            autoPreviewType = "top";
+            autoPreviewPhase = 0;
+            autoPreviewStep = 0;
+            return;
+          }
+
+          if (instructionPage === 4) {
+            autoPreviewMode = true;
+            previewCard = { img: cardImages["A♠"] };
+            autoPreviewType = "bottom";
+            autoPreviewStep = 0;
+            return;
+          }
+
+          if (instructionPage < totalInstructionPages) {
+            instructionPage++;
+            previewCard = null;
+          } else {
+            previewCard = null;
+            window.location.href = "tutorinter.html";
+          }
+          return;
+        }
+      }
+    }
+
+    function getClickedCategoryCard(mx, my) {
+      let y = height * 0.4;
+      let spacing = width * 0.02;
+      let totalWidth = cardW * 4 + spacing * 3;
+      let startX = width / 2 - totalWidth / 2 + tutorialOffsetX;
+      let suitKeys = ["A♠", "A♥", "A♦", "A♣"];
+
+      for (let i = 0; i < 4; i++) {
+        let x = startX + i * (cardW + spacing);
+        if (mx > x && mx < x + cardW && my > y && my < y + cardH) {
+          return { img: cardImages[suitKeys[i]] };
+        }
+      }
+      return null;
+    }
+
+    function getClickedIconCard(mx, my) {
+      let y = height * 0.4;
+      let spacing = width * 0.02;
+      let totalWidth = cardW * 3 + spacing * (3 - 1);
+      let startX = width / 2 - totalWidth / 2 + tutorialOffsetX;
+      let suitKeys = ["A♠", "7♠", "6♠"];
+
+      for (let i = 0; i < 3; i++) {
+        let x = startX + i * (cardW + spacing);
+        if (mx > x && mx < x + cardW && my > y && my < y + cardH) {
+          return { img: cardImages[suitKeys[i]] };
+        }
+      }
+      return null;
+    }
+
+    function getLabel(value) {
+      if (value === 1) return "A";
+      if (value === 11) return "J";
+      if (value === 12) return "Q";
+      if (value === 13) return "K";
+      return value.toString();
+    }
   </script>
 </body>
 </html>
