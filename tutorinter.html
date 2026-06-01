@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Caturasa - Card Game Fullscreen</title>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-image: url("/assets/sisa/gameBG.png");
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+
+<body>
+
+  <script>
+    // ── Icon & suit definitions ─────────────────────────────────────
+    let deck = [];
+    let discardPile = [];
+    let playerHand = [];
+    let aiHand = [];
+    let turn = "player";
+    let message = "Ambil 1 kartu dari Deck atau Discard Pile";
+    let suits = ["♠", "♥", "♦", "♣"];
+
+    let iconDist = [
+      { icon: "triangle", count: 5, score: 4  },
+      { icon: "circle",   count: 4, score: 6  },
+      { icon: "square",   count: 4, score: 10 }
+    ];
+
+    let BONUS_POINTS = 5; 
+    let draggingCard  = null;
+    let previewCard   = null;
+    let draggingIndex = -1;
+
+    // Dynamic Card Dimension Scalers
+    let cardW = 100;
+    let cardH = 150;
+
+    let dealing = true;
+    let dealQueue = [];
+    let currentDeal = null;
+    let dealSpeed = 0.15;
+
+    let leftImageTop;
+    let leftImageBottom;
+
+    let aiAnimating = false;
+    let aiDrawnCard = null;
+    let aiDiscardedCard = null;
+    let aiAnimation = null;
+    let aiThinking = false;
+
+    let cardImages = {};
+    let backImage;
+    let revealAI   = false;
+    
+    let gameState = "tutorial"; 
+    
+    // ── State Tambahan untuk Modul Tutorial ──────────────────────
+    let tutorialStep = 0; 
+    const TOTAL_TUTORIAL_STEPS = 7;
+    let fingerT = 0;
+    let aiTimer = 0;
+    let myFont1;
+    let myFont2;
+
+    // Variabel bantu untuk animasi kartu tiruan di tutorial AI
+    let tutAiCardX, tutAiCardY;
+    let tutAiState = "thinking"; // thinking, drawing, discarding, done
+
+    // ── Responsive Layout Helpers ──────────────────────────────────────────────
+    function updateCardDimensions() {
+      cardH = min(height * 0.23, 160);
+      cardW = cardH * 0.66;
+    }
+
+    function deckX()    { return width / 2 - cardW - (width * 0.04); }
+    function discardX() { return width / 2 + (width * 0.04);  }
+    function midY()     { return height / 2 - cardH / 2; }
+    function playerY()  { return height - cardH - (height * 0.08); }
+    function aiY()      { return height * 0.08; }
+
+    function handStartX(hand) {
+      let spacing = cardW * 1.15;
+      let totalW = hand.length * spacing - (spacing - cardW);
+      return width / 2 - totalW / 2;
+    }
+
+    // ── Card → icon mapping ─────────────────────────────────────────
+    let cardDefs = [
+      { label: "2",  icon: "triangle", score: 4  },
+      { label: "3",  icon: "triangle", score: 4  },
+      { label: "4",  icon: "triangle", score: 4  },
+      { label: "5",  icon: "triangle", score: 4  },
+      { label: "6",  icon: "triangle", score: 4  },
+      { label: "7",  icon: "circle",   score: 6  },
+      { label: "8",  icon: "circle",   score: 6  },
+      { label: "9",  icon: "circle",   score: 6  },
+      { label: "10", icon: "circle",   score: 6  },
+      { label: "A",  icon: "square",   score: 10 },
+      { label: "J",  icon: "square",   score: 10 },
+      { label: "Q",  icon: "square",   score: 10 },
+      { label: "K",  icon: "square",   score: 10 }
+    ];
+
+    // ── Preload ─────────────────────────────────────────────────────
+    function preload() {
+      myFont1 = loadFont('assets/font/SugarpunchDEMO.otf');
+      myFont2 = loadFont('assets/font/Poppins-Medium.ttf');
+      
+      leftImageTop = loadImage("assets/cards/Points.png");
+      leftImageBottom = loadImage("assets/cards/Point charts.png");
+
+      let suitMap = { "♠": "J", "♥": "K", "♦": "S", "♣": "M" };
+
+      for (let suit of suits) {
+        for (let def of cardDefs) {
+          let key      = def.label + suit;
+          let filename = def.label + suitMap[suit] + ".png";
+          cardImages[key] = loadImage("assets/cards/" + filename);
+        }
+      }
+
+      backImage = loadImage("assets/cards/BG.png");
+    }
+
+    // ── Setup & Window Resizing ───────────────────────────────────────────────────────
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+      clear();
+      updateCardDimensions();
+      textFont(myFont2);
+      pixelDensity(4);
+      
+      startTutorialMode(); 
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+      updateCardDimensions();
+    }
+
+    // ── Start / reset ───────────────────────────────────────────────
+    function startGame() {
+      window.location.href = "index.html"; 
+    }
+
+    function startTutorialMode() {
+      tutorialStep = 0;
+      deck = [];
+      discardPile = [];
+      playerHand = [];
+      aiHand = [];
+      previewCard = null;
+      aiThinking = false;
+
+      createDeck();
+      shuffleDeck();
+      
+      for (let i = 0; i < 4; i++) {
+        playerHand.push(deck.pop());
+        aiHand.push(deck.pop());
+      }
+      discardPile.push(deck.pop());
+      
+      dealing = false; 
+      gameState = "tutorial";
+    }
+
+    // ── Deck creation ───────────────────────────────────────────────
+    function createDeck() {
+      deck = [];
+      for (let suit of suits) {
+        for (let def of cardDefs) {
+          let key = def.label + suit;
+          deck.push({
+            suit,
+            label: def.label,
+            icon:  def.icon,
+            score: def.score,
+            img:   cardImages[key],
+            x: 0,
+            y: 0
+          });
+        }
+      }
+    }
+
+    function shuffleDeck() {
+      for (let i = deck.length - 1; i > 0; i--) {
+        let j = floor(random(i + 1));
+        [deck[i], deck[j]] = [deck[j], deck[i]];
+      }
+    }
+
+    // ── Score calculation ───────────────────────────────────────────
+    function calculateScore(hand) {
+      let suitScores = { "♠": 0, "♥": 0, "♦": 0, "♣": 0 };
+
+      for (let card of hand) {
+        suitScores[card.suit] += card.score;
+      }
+
+      if (hand.length === 4) {
+        let first   = hand[0];
+        let allSame = hand.every(c => c.suit === first.suit && c.icon === first.icon);
+        if (allSame) {
+          suitScores[first.suit] += BONUS_POINTS;
+        }
+      }
+
+      return max(
+        suitScores["♠"],
+        suitScores["♥"],
+        suitScores["♦"],
+        suitScores["♣"]
+      );
+    }
+
+    function getSuitScore(hand, suit) {
+      let total = 0;
+      for (let card of hand) if (card.suit === suit) total += card.score;
+      return total;
+    }
+
+    // ── Win condition ───────────────────────────────────────────────
+    function checkFinalWinner() {
+      revealAI = true;
+      let playerScore = calculateScore(playerHand);
+      let aiScore     = calculateScore(aiHand);
+
+      if (playerScore > aiScore)
+        message = "KAMU MENANG! " + playerScore + " vs " + aiScore;
+      else if (aiScore > playerScore)
+        message = "AI MENANG! " + aiScore + " vs " + playerScore;
+      else
+        message = "DRAW! " + playerScore + " poin";
+
+      turn = "none";
+    }
+
+    // ── Draw loop ───────────────────────────────────────────────────
+    function draw() {
+      clear();
+
+      drawLeftImages();
+      drawDeck();
+      drawDiscard();
+
+      if (!dealing) {
+        drawPlayerHand();
+        drawAIHand();
+      }
+
+      if (gameState === "tutorial") {
+        drawTutorialUI();
+        return; 
+      }
+
+      animateDeal();
+      drawUI();
+
+      if (dealing) return;
+
+      if (turn === "ai" && !aiAnimating) {
+        aiAnimating = true;
+        turn = "waiting";
+        setTimeout(aiTurn, 700);
+      }
+
+      if (aiDrawnCard) {
+        drawCard(aiDrawnCard, width / 2 + (width * 0.15), aiY() + 40, true);
+      }
+
+      if (aiDiscardedCard) {
+        drawCard(aiDiscardedCard, discardX(), midY() - 30, true);
+      }
+
+      if (previewCard && gameState === "playing") {
+        drawPreviewCard();
+      }
+
+      if (draggingCard) {
+        drawCard(draggingCard, mouseX - cardW / 2, mouseY - cardH / 2, true);
+      }
+
+      if (aiAnimation) {
+        let x = lerp(aiAnimation.startX, aiAnimation.endX, aiAnimation.progress);
+        let y = lerp(aiAnimation.startY, aiAnimation.endY, aiAnimation.progress);
+        drawCard(aiAnimation.card, x, y, aiAnimation.faceUp);
+        aiAnimation.progress += 0.08;
+        if (aiAnimation.progress >= 1) {
+          finishAIAnimation();
+        }
+      }
+    }
+
+    // ── Card preview (bottom-right) ─────────────────────────────────
+    function drawPreviewCard() {
+      let bigW = cardW * 3;
+      let bigH = cardH * 3;
+      let x = width - bigW - (width * 0.03);
+      let y = height / 2 - bigH / 2;
+
+      drawingContext.shadowColor = "rgba(0,0,0,0.75)";
+      drawingContext.shadowBlur = 45;
+      drawingContext.shadowOffsetX = 18;
+      drawingContext.shadowOffsetY = 22;
+
+      image(previewCard.img, x, y, bigW, bigH);
+      drawingContext.shadowColor = "transparent";
+    }
+
+    // ── Left Side Layout Images ─────────────────────────────────────
+    function drawLeftImages() {
+      let maxPanelH = height * 0.46;
+      
+      let topW = leftImageTop.width * (maxPanelH / leftImageTop.height);
+      image(leftImageTop, width * 0.02, height * 0.05, topW, maxPanelH);
+
+      let bottomW = leftImageBottom.width * (maxPanelH / leftImageBottom.height);
+      image(leftImageBottom, width * 0.02, height * 0.52, bottomW, maxPanelH);
+    }
+
+    // ── SYSTEM NEW INTERACTIVE LECTURE TUTORIAL UI LOOP ───────────────
+    function drawTutorialUI() {
+      // STEP 0: AMBIL KARTU DARI DECK
+      if (tutorialStep === 0) {
+        let x = deckX();
+        let y = midY();
+        drawSpotlight(x, y, cardW, cardH);
+        drawPulseBox(x, y, cardW, cardH);
+        drawTooltip("Cara Bermain, 1. Ambil kartu.\n\nKlik tumpukan Deck tengah untuk menarik kartu baru ke dalam tanganmu.", x + cardW + 35, y - 20);
+        drawFingerTap(x + cardW / 2, y + cardH / 2);
+      }
+
+      // STEP 1: BUANG KARTU KE DISCARD PILE
+      else if (tutorialStep === 1) {
+        let handX = handStartX(playerHand);
+        let handW = playerHand.length * (cardW * 1.15) - (cardW * 0.15);
+        let handY = playerY();
+
+        drawDualSpotlight(handX, handY, handW, cardH, discardX(), midY(), cardW, cardH);
+        
+        drawPulseBox(handX, handY, handW, cardH);
+        drawPulseBox(discardX(), midY(), cardW, cardH);
+
+        drawTooltip("2. Buang Kartu\n\nSeret (DRAG) salah satu kartu dari tanganmu ke Discard Pile.", discardX() - 365, midY() - 20);
+        
+        let startX = handX + (cardW * 1.15) * 2 + (cardW / 2);
+        let startY = handY + (cardH / 2);
+        drawFingerDrag(startX, startY, discardX() + cardW / 2, midY() + cardH / 2);
+        
+        if (draggingCard) {
+          drawCard(draggingCard, mouseX - cardW / 2, mouseY - cardH / 2, true);
+        }
+      }
+
+      // STEP 2: SIMULASI GILIRAN AI
+      else if (tutorialStep === 2) {
+        let aiXStart = handStartX(aiHand);
+        let aiW = aiHand.length * (cardW * 1.15) - (cardW * 0.15);
+        
+        drawSpotlight(aiXStart - 10, aiY() - 10, aiW + 20, cardH + 20);
+        drawPulseBox(aiXStart - 10, aiY() - 10, aiW + 20, cardH + 20);
+
+        if (!aiThinking) {
+          aiThinking = true;
+          aiTimer = millis();
+          tutAiState = "thinking";
+          fingerT = 0;
+        }
+
+        let elapsed = millis() - aiTimer;
+        let msgY = height - 250; // Diberikan ruang ekstra agar tidak mepet bawah
+
+        if (elapsed <= 1500) {
+          tutAiState = "thinking";
+          drawTooltip("Giliran AI...\n\nKamu akan melawan AI dalam game ini.", width / 2 - 175, msgY);
+          
+          push();
+          translate(width / 2, msgY + 165);
+          rotate(frameCount * 0.08);
+          stroke(255, 235, 59);
+          strokeWeight(4);
+          noFill();
+          arc(0, 0, 30, 30, 0, PI + HALF_PI);
+          pop();
+        } 
+        else if (elapsed > 1500 && elapsed <= 3000) {
+          tutAiState = "drawing";
+          drawTooltip("AI Mengambil kartu...\n\nKamu akan melawan AI dalam game ini.", width / 2 - 175, msgY);
+          
+          fingerT += 0.05;
+          let amt = min(fingerT, 1);
+          tutAiCardX = lerp(deckX(), aiXStart + aiHand.length * (cardW * 1.15), amt);
+          tutAiCardY = lerp(midY(), aiY(), amt);
+          
+          drawCard(backImage, tutAiCardX, tutAiCardY, false);
+        } 
+        else if (elapsed > 3000 && elapsed <= 4500) {
+          if (tutAiState === "drawing") {
+            fingerT = 0; 
+            tutAiState = "discarding";
+          }
+          drawTooltip("AI Membuang kartu...\n\nKamu akan melawan AI dalam game ini.", width / 2 - 175, msgY);
+          
+          fingerT += 0.05;
+          let amt = min(fingerT, 1);
+          tutAiCardX = lerp(aiXStart, discardX(), amt);
+          tutAiCardY = lerp(aiY(), midY(), amt);
+          
+          drawCard(backImage, tutAiCardX, tutAiCardY, false); 
+        } 
+        else {
+          aiThinking = false;
+          tutorialStep = 3; 
+        }
+      }
+
+      // STEP 3: INDIKATOR GAMBAR POIN SISI KIRI SCREEN
+      else if (tutorialStep === 3) {
+        let maxPanelH = height * 0.46;
+        let topW = leftImageTop.width * (maxPanelH / leftImageTop.height);
+        
+        drawSpotlight(width * 0.015, height * 0.04, topW + 15, height * 0.94);
+        drawPulseBox(width * 0.015, height * 0.04, topW + 15, height * 0.94);
+
+        drawTooltip("Panel Indikator Poin:\n\nLihat info nilai kombinasi kartu simbol di sini.\n\n[Klik mana saja untuk lanjut]", width * 0.04 + topW + 15, height * 0.4);
+      }
+
+      // STEP 4: FITUR ENLARGE / ZOOM PRATINJAU KARTU
+      else if (tutorialStep === 4) {
+        let x = handStartX(playerHand);
+        let y = playerY();
+        let spacing = cardW * 1.15;
+        let fullHandW = playerHand.length * spacing - (spacing - cardW);
+        
+        drawSpotlight(x - 10, y - 10, fullHandW + 20, cardH + 20);
+        drawPulseBox(x - 10, y - 10, fullHandW + 20, cardH + 20);
+        drawTooltip("Pembesaran Kartu:\n\nKlik kartu di tanganmu untuk memperbesar visual di sisi kanan.", width / 2 - 175, y - 165);
+        
+        if (previewCard) {
+          tutorialStep = 5;
+        }
+      }
+
+      // STEP 5: CARA MENUTUP AREA JENDELA PREVIEW
+      else if (tutorialStep === 5) {
+        let bigW = cardW * 3;
+        let bigH = cardH * 3;
+        let x = width - bigW - (width * 0.03);
+        let y = height / 2 - bigH / 2;
+
+        drawSpotlight(x, y, bigW, bigH);
+        drawPulseBox(x, y, bigW, bigH);
+        
+        if (previewCard) {
+          image(previewCard.img, x, y, bigW, bigH);
+        }
+
+        drawTooltip("Preview Kartu:\n\nPemain dapat melihat detail kartu lebih jelas dan menyusun strategi.\n\n[Klik layar luar kosong untuk lanjut]", x - 365, y + bigH / 2 - 65);
+      }
+
+      // STEP 6: SELESAI & TOMBOL PLAY
+      else if (tutorialStep === 6) {
+        let bW = 240;
+        let bH = 65;
+        let bX = width / 2 - bW / 2;
+        let bY = height / 2 - bH / 2 + 65; 
+
+        let infoW = 520; // Lebar ditambah sedikit agar teks target skor mengalir longgar
+        let infoH = 95;
+        let infoX = width / 2 - infoW / 2;
+        let infoY = bY - infoH - 25;
+
+        drawSpotlight(bX, bY, bW, bH);
+        drawPulseBox(bX, bY, bW, bH);
+
+        push();
+        fill(255); 
+        stroke(180);
+        strokeWeight(1.5);
+        rect(infoX, infoY, infoW, infoH, 12);
+        
+        fill(30, 35, 45); 
+        noStroke();
+        textAlign(CENTER, TOP);
+        textSize(15);
+        textLeading(24);
+        // Menampilkan teks aturan dengan margin internal atas-bawah yang longgar
+        text("Kumpulkan poin terbanyak dari 1 daerah untuk menang!\nPoin tertinggi adalah 45. Jika salah satu sudah mencapai 45, game akan selesai.", infoX + 20, infoY + 18, infoW - 40);
+        pop();
+
+        fill(200);
+        rect(bX, bY, bW, bH, 15);
+        
+        fill(0);
+        textAlign(CENTER, CENTER);
+        textSize(20);
+        text("Mulai Bermain", bX + bW / 2, bY + bH / 2);
+       // drawFingerTap(bX + bW / 2, bY + bH / 2);
+      }
+    }
+
+    // ── FX GRAPHICS GENERATOR FOR TUTORIAL ───────────────────────────
+    function drawSpotlight(x, y, w, h) {
+      fill(0, 0, 0, 200);
+      noStroke();
+      rect(0, 0, width, y);
+      rect(0, y + h, width, height - (y + h));
+      rect(0, y, x, h);
+      rect(x + w, y, width - (x + w), h);
+    }
+
+    function drawDualSpotlight(x1, y1, w1, h1, x2, y2, w2, h2) {
+      fill(0, 0, 0, 200);
+      noStroke();
+      
+      beginShape();
+      vertex(0, 0);
+      vertex(width, 0);
+      vertex(width, height);
+      vertex(0, height);
+      
+      beginContour();
+      vertex(x1, y1);
+      vertex(x1, y1 + h1);
+      vertex(x1 + w1, y1 + h1);
+      vertex(x1 + w1, y1);
+      endContour();
+      
+      beginContour();
+      vertex(x2, y2);
+      vertex(x2, y2 + h2);
+      vertex(x2 + w2, y2 + h2);
+      vertex(x2 + w2, y2);
+      endContour();
+      
+      endShape(CLOSE);
+    }
+
+    function drawPulseBox(x, y, w, h) {
+      let maxPulse = 30;
+      let totalDuration = 1.4;
+      let t = (millis() / 1000) % totalDuration;
+      let pulse = (t < 0.4) ? (1 - (t / 0.4)) * maxPulse : 0;
+
+      noFill();
+      stroke(255, 235, 59);
+      strokeWeight(3.5);
+      rect(x, y, w, h, 12);
+
+      stroke(255, 235, 59, 100);
+      rect(x - pulse, y - pulse, w + pulse * 2, h + pulse * 2, 14);
+      noStroke();
+    }
+
+    // UPDATED: Kotak kini berukuran dinamis otomatis mengikuti tinggi akumulasi baris teks
+    function drawTooltip(txt, x, y) {
+      push();
+      textSize(14);
+      textLeading(22);
+      
+      let boxW = 340;
+      let pad = 20;
+      
+      // Menghitung tinggi ideal teks p5 sebelum kotak di-render agar pas (tidak mepet)
+      let textSpaceW = boxW - (pad * 2);
+      let calculatedH = textHeight(txt, textSpaceW) + (pad * 2);
+
+      fill(255);
+      stroke(190);
+      strokeWeight(1.5);
+      rect(x, y, boxW, calculatedH, 14);
+      
+      fill(15, 15, 22);
+      noStroke();
+      textAlign(LEFT, TOP);
+      text(txt, x + pad, y + pad, textSpaceW);
+      pop();
+    }
+
+    // Fungsi utilitas pembantu untuk menghitung bounding box tinggi string pada text wrap
+    function textHeight(txt, maxW) {
+      let lines = txt.split('\n');
+      let totalH = 0;
+      for (let line of lines) {
+        if (line === '') {
+          totalH += textLeading();
+          continue;
+        }
+        let words = line.split(' ');
+        let currentLine = '';
+        let lineCount = 1;
+        for (let word of words) {
+          let testLine = currentLine + word + ' ';
+          if (textWidth(testLine) > maxW && currentLine !== '') {
+            lineCount++;
+            currentLine = word + ' ';
+          } else {
+            currentLine = testLine;
+          }
+        }
+        totalH += lineCount * textLeading();
+      }
+      return totalH;
+    }
+
+    function drawFingerDrag(x1, y1, x2, y2) {
+      fingerT += 0.015;
+      if (fingerT > 1) fingerT = 0;
+      let x = lerp(x1, x2, fingerT);
+      let y = lerp(y1, y2, fingerT);
+      fill(255, 235, 59, 180);
+      ellipse(x, y, 25, 25);
+      fill(255, 255, 255, 120);
+      ellipse(x, y, 45, 45);
+    }
+
+    function drawFingerTap(x, y) {
+      let sz = (frameCount % 40) * 1.5;
+      let alpha = map(sz, 0, 60, 220, 0);
+      stroke(255, 235, 59, alpha);
+      strokeWeight(3);
+      noFill();
+      ellipse(x, y, sz, sz);
+      fill(255, 215, 0);
+      noStroke();
+      ellipse(x, y, 15, 15);
+    }
+
+    function drawCard(cardOrImg, x, y, faceUp = true) {
+      drawingContext.shadowColor = "rgba(0,0,0,0.6)";
+      drawingContext.shadowBlur = 18;
+      drawingContext.shadowOffsetX = 8;
+      drawingContext.shadowOffsetY = 10;
+
+      let targetImg = cardOrImg.img ? cardOrImg.img : cardOrImg;
+
+      if (faceUp) image(targetImg, x, y, cardW, cardH);
+      else         image(backImage, x, y, cardW, cardH);
+
+      drawingContext.shadowColor = "transparent";
+    }
+
+    function drawPlayerHand() {
+      let startX = handStartX(playerHand);
+      let y      = playerY();
+      let spacing = cardW * 1.15;
+
+      for (let i = 0; i < playerHand.length; i++) {
+        if (i === draggingIndex) continue;
+
+        let x = startX + i * spacing;
+        let c = playerHand[i];
+        c.x   = x;
+        c.y   = y;
+
+        let hovering = mouseX > x && mouseX < x + cardW && mouseY > y && mouseY < y + cardH;
+
+        if (hovering && gameState === "playing") {
+          let zoom = 1.15;
+          let newW = cardW * zoom, newH = cardH * zoom;
+          image(c.img, x - (newW - cardW) / 2, y - (newH - cardH) / 2, newW, newH);
+        } else {
+          drawCard(c, x, y, true);
+        }
+      }
+    }
+
+    function drawAIHand() {
+      let startX = handStartX(aiHand);
+      let spacing = cardW * 1.15;
+      for (let i = 0; i < aiHand.length; i++) {
+        drawCard(aiHand[i], startX + i * spacing, aiY(), revealAI);
+      }
+    }
+
+    function drawDeck() {
+      let x = deckX();
+      let y = midY();
+      drawingContext.shadowColor = "rgba(0,0,0,0.65)";
+      drawingContext.shadowBlur = 25;
+      drawingContext.shadowOffsetX = 10;
+      drawingContext.shadowOffsetY = 12;
+
+      image(backImage, x, y, cardW, cardH);
+      drawingContext.shadowColor = "transparent";
+
+      fill(255);
+      textAlign(CENTER);
+      textSize(14);
+      text(deck.length, x + cardW / 2, y + cardH + 18);
+    }
+
+    function drawDiscard() {
+      if (discardPile.length > 0)
+        drawCard(discardPile[discardPile.length - 1], discardX(), midY(), true);
+
+      noFill();
+      stroke(255);
+      rect(discardX(), midY(), cardW, cardH);
+      noStroke();
+    }
+
+    function checkInstantWin() {
+      let playerScore = calculateScore(playerHand);
+      let aiScore = calculateScore(aiHand);
+
+      if (playerScore >= 45) {
+        revealAI = true;
+        message = "KAMU MENANG! (45 poin tercapai)";
+        turn = "none";
+        return true;
+      }
+
+      if (aiScore >= 45) {
+        revealAI = true;
+        message = "AI MENANG! (45 poin tercapai)";
+        turn = "none";
+        return true;
+      }
+
+      return false;
+    }
+
+    function drawUI() {
+      fill(255);
+      textAlign(CENTER);
+      textSize(min(width * 0.018, 20));
+      text(message, width / 2, midY() - 25);
+
+      textSize(15);
+      text("Poin Kamu: " + calculateScore(playerHand), width / 2, playerY() + cardH + 20);
+      text("Poin AI: "    + calculateScore(aiHand),     width / 2, aiY() - 15);
+
+      if (playerHand.length === 4) {
+        let first   = playerHand[0];
+        let allSame = playerHand.every(c => c.suit === first.suit && c.icon === first.icon);
+        if (allSame) {
+          fill(255, 220, 50);
+          textSize(16);
+          text("✦ BONUS +5!", width / 2, playerY() + cardH + 42);
+        }
+      }
+    }
+
+    // ── Mouse inputs ─────────────────────────────────────────────────
+    function mousePressed() {
+      if (gameState === "tutorial") {
+        if (tutorialStep === 0) {
+          if (mouseX > deckX() && mouseX < deckX() + cardW && mouseY > midY() && mouseY < midY() + cardH) {
+            playerHand.push(deck.pop());
+            tutorialStep = 1; 
+          }
+          return;
+        }
+
+        if (tutorialStep === 1) {
+          for (let i = 0; i < playerHand.length; i++) {
+            let c = playerHand[i];
+            if (mouseX > c.x && mouseX < c.x + cardW && mouseY > c.y && mouseY < c.y + cardH) {
+              if (playerHand.length >= 5) {
+                draggingCard = c;
+                draggingIndex = i;
+              }
+              break;
+            }
+          }
+          return;
+        }
+
+        if (tutorialStep === 3) {
+          tutorialStep = 4; 
+          return;
+        }
+
+        if (tutorialStep === 4) {
+          let sX = handStartX(playerHand);
+          let sY = playerY();
+          let spacing = cardW * 1.15;
+          let fullHandW = playerHand.length * spacing - (spacing - cardW);
+          if (mouseX > sX && mouseX < sX + fullHandW && mouseY > sY && mouseY < sY + cardH) {
+            previewCard = playerHand[0]; 
+            tutorialStep = 5;
+          }
+          return;
+        }
+
+        if (tutorialStep === 5) {
+          previewCard = null;
+          tutorialStep = 6; 
+          return;
+        }
+
+        if (tutorialStep === 6) {
+          let bW = 240; let bH = 65;
+          let bY = height / 2 - bH / 2 + 65;
+          if (mouseX > width/2 - bW/2 && mouseX < width/2 + bW/2 && mouseY > bY && mouseY < bY + bH) {
+            startGame(); 
+          }
+        }
+        return;
+      }
+
+      if (dealing)          return;
+      if (turn !== "player") return;
+
+      if (mouseX > deckX() && mouseX < deckX() + cardW &&
+          mouseY > midY()    && mouseY < midY() + cardH) {
+        if (deck.length === 0) { checkFinalWinner(); return; }
+        if (playerHand.length >= 5) { message = "Buang 1 kartu dulu!"; return; }
+        playerHand.push(deck.pop());
+        message = "Buang 1 kartu";
+        return;
+      }
+
+      if (mouseX > discardX() && mouseX < discardX() + cardW &&
+          mouseY > midY()      && mouseY < midY() + cardH) {
+        if (discardPile.length === 0) return;
+        if (playerHand.length >= 5)   { message = "Buang 1 kartu dulu!"; return; }
+        playerHand.push(discardPile.pop());
+        message = "Buang 1 kartu";
+        return;
+      }
+
+      for (let i = 0; i < playerHand.length; i++) {
+        let c = playerHand[i];
+        if (mouseX > c.x && mouseX < c.x + cardW &&
+            mouseY > c.y && mouseY < c.y + cardH) {
+          
+          previewCard = c;
+          
+          if (playerHand.length < 5) {
+            message = "Ambil 1 kartu terlebih dahulu!";
+            draggingCard = null;
+            draggingIndex = -1;
+          } else {
+            draggingCard  = c;
+            draggingIndex = i;
+          }
+          break;
+        }
+      }
+    }
+
+    function mouseReleased() {
+      if (dealing)       return;
+      
+      if (gameState === "tutorial" && tutorialStep === 1 && draggingCard) {
+        if (mouseX > discardX() && mouseX < discardX() + cardW && mouseY > midY() && mouseY < midY() + cardH) {
+          discardPile.push(draggingCard);
+          playerHand.splice(draggingIndex, 1);
+          tutorialStep = 2; 
+        }
+        draggingCard = null;
+        draggingIndex = -1;
+        return;
+      }
+
+      if (!draggingCard) return;
+
+      if (mouseX > discardX() && mouseX < discardX() + cardW &&
+          mouseY > midY()      && mouseY < midY() + cardH) {
+        discardPile.push(draggingCard);
+        playerHand.splice(draggingIndex, 1);
+        turn    = "ai";
+        message = "Giliran AI";
+      }
+
+      draggingCard  = null;
+      draggingIndex = -1;
+    }
+
+    // ── AI Animation Handlers ───────────────────────────────────────────────────
+    function startAIAnimation(card, startX, startY, endX, endY, action, faceUp = true) {
+      aiAnimation = { card, startX, startY, endX, endY, progress: 0, action, faceUp };
+    }
+
+    function finishAIAnimation() {
+      if (aiAnimation.action === "draw") {
+        aiHand.push(aiAnimation.card);
+        let drawnCard = aiAnimation.card;
+        aiAnimation = null;
+        setTimeout(() => { aiDiscardStep(drawnCard); }, 500);
+
+      } else if (aiAnimation.action === "discard") {
+        discardPile.push(aiAnimation.card);
+        aiAnimation = null;
+
+        if (checkInstantWin()) {
+          aiAnimating = false;
+          return;
+        }
+
+        setTimeout(() => {
+          turn = "player";
+          aiThinking = false;
+          aiAnimating = false;
+          message = "Ambil 1 kartu dari Deck atau Discard Pile";
+        }, 500);
+      }
+    }
+
+    function aiDiscardStep() {
+      let worstIndex = findWorstCard(aiHand);
+      let discardCard = aiHand[worstIndex];
+      let spacing = cardW * 1.15;
+      let startX = handStartX(aiHand) + worstIndex * spacing;
+      let startY = aiY();
+
+      aiHand.splice(worstIndex, 1);
+      message = "AI membuang kartu...";
+
+      startAIAnimation(discardCard, startX, startY, discardX(), midY(), "discard");
+    }
+
+    // ── AI Logic ────────────────────────────────────────────────────
+    function aiTurn() {
+      if (deck.length === 0 && discardPile.length === 0) {
+        checkFinalWinner();
+        return;
+      }
+
+      let topDiscard = discardPile[discardPile.length - 1];
+      let bestSuit = getBestSuit(aiHand);
+      let takeDiscard = false;
+
+      if (topDiscard) {
+        let simulatedHand = [...aiHand, topDiscard];
+        let improvesScore = getSuitScore(simulatedHand, bestSuit) > getSuitScore(aiHand, bestSuit);
+        let getsBonus = wouldCompleteBonus(aiHand, topDiscard);
+
+        if (improvesScore || getsBonus) {
+          takeDiscard = true;
+        }
+      }
+
+      let drawnCard; let startX; let startY;
+
+      if (takeDiscard && discardPile.length > 0) {
+        drawnCard = discardPile.pop(); startX = discardX(); startY = midY();
+      } else {
+        drawnCard = deck.pop(); startX = deckX(); startY = midY();
+      }
+
+      message = "AI mengambil kartu...";
+      let faceUp = takeDiscard;
+      let spacing = cardW * 1.15;
+
+      startAIAnimation(drawnCard, startX, startY, handStartX(aiHand) + aiHand.length * spacing, aiY(), "draw", faceUp);
+    }
+
+    function wouldCompleteBonus(hand, candidate) {
+      if (hand.length !== 3) return false;
+      return hand.every(c => c.suit === candidate.suit && c.icon === candidate.icon);
+    }
+
+    function getBestSuit(hand) {
+      let suitScores = { "♠": 0, "♥": 0, "♦": 0, "♣": 0 };
+      for (let card of hand) {
+        suitScores[card.suit] += card.score;
+      }
+      let bestSuit = suits[0];
+      for (let suit of suits) {
+        if (suitScores[suit] > suitScores[bestSuit]) {
+          bestSuit = suit;
+        }
+      }
+      return bestSuit;
+    }
+
+    function findWorstCard(hand) {
+      let bestSuit = getBestSuit(hand);
+      let worstIndex = -1;
+      let lowestScore = 999;
+
+      for (let i = 0; i < hand.length; i++) {
+        if (hand[i].suit !== bestSuit && hand[i].score < lowestScore) {
+          lowestScore = hand[i].score;
+          worstIndex = i;
+        }
+      }
+
+      if (worstIndex === -1) {
+        worstIndex = 0;
+        for (let i = 1; i < hand.length; i++) {
+          if (hand[i].score < hand[worstIndex].score) {
+            worstIndex = i;
+          }
+        }
+      }
+      return worstIndex;
+    }
+  </script>
+</body>
+</html>

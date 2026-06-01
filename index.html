@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Caturasa - Card Game Fullscreen</title>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/addons/p5.sound.min.js"></script>
+  
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-image: url("/assets/sisa/gameBG.png");
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+
+<body>
+
+  <script>
+    // ── Icon & suit definitions ─────────────────────────────────────
+let deck = [];
+let discardPile = [];
+let playerHand = [];
+let aiHand = [];
+let turn = "player";
+let message = "Ambil 1 kartu dari Deck atau Discard Pile";
+let suits = ["♠", "♥", "♦", "♣"];
+
+let iconDist = [
+  { icon: "triangle", count: 5, score: 4  },
+  { icon: "circle",   count: 4, score: 6  },
+  { icon: "square",   count: 4, score: 10 }
+];
+
+let BONUS_POINTS = 5; 
+let draggingCard  = null;
+let previewCard   = null;
+let draggingIndex = -1;
+
+// Dynamic Card Dimension Scalers
+let cardW = 100;
+let cardH = 150;
+
+let dealing = true;
+let dealQueue = [];
+let currentDeal = null;
+let dealSpeed = 0.15;
+
+let leftImageTop;
+let leftImageBottom;
+
+let aiAnimating = false;
+let aiDrawnCard = null;
+let aiDiscardedCard = null;
+let aiAnimation = null;
+let aiThinking = false;
+
+let cardImages = {};
+let backImage;
+let revealAI   = false;
+let gameState = "playing"; 
+let myFont1;
+let myFont2;
+
+// Musik latar global
+let bgm;
+
+// ── Responsive Layout Helpers ──────────────────────────────────────────────
+function updateCardDimensions() {
+  cardH = min(height * 0.23, 160);
+  cardW = cardH * 0.66;
+}
+
+function deckX()    { return width / 2 - cardW - (width * 0.04); }
+function discardX() { return width / 2 + (width * 0.04);  }
+function midY()     { return height / 2 - cardH / 2; }
+function playerY()  { return height - cardH - (height * 0.08); }
+function aiY()      { return height * 0.08; }
+
+function handStartX(hand) {
+  let spacing = cardW * 1.15;
+  let totalW = hand.length * spacing - (spacing - cardW);
+  return width / 2 - totalW / 2;
+}
+
+// End-Game UI Configuration
+function getEndGameButtonsLayout() {
+  let btnW = min(width * 0.16, 180);
+  let btnH = min(height * 0.07, 50);
+  let gap = width * 0.02;
+  let totalW = (btnW * 2) + gap;
+  let startX = width / 2 - totalW / 2;
+  let y = midY() + 40; 
+  
+  return { btnW, btnH, gap, startX, y };
+}
+
+// ── Card → icon mapping ─────────────────────────────────────────
+let cardDefs = [
+  { label: "2",  icon: "triangle", score: 4  },
+  { label: "3",  icon: "triangle", score: 4  },
+  { label: "4",  icon: "triangle", score: 4  },
+  { label: "5",  icon: "triangle", score: 4  },
+  { label: "6",  icon: "triangle", score: 4  },
+  { label: "7",  icon: "circle",   score: 6  },
+  { label: "8",  icon: "circle",   score: 6  },
+  { label: "9",  icon: "circle",   score: 6  },
+  { label: "10", icon: "circle",   score: 6  },
+  { label: "A",  icon: "square",   score: 10 },
+  { label: "J",  icon: "square",   score: 10 },
+  { label: "Q",  icon: "square",   score: 10 },
+  { label: "K",  icon: "square",   score: 10 }
+];
+
+// ── Preload ─────────────────────────────────────────────────────
+function preload() {
+  myFont1 = loadFont('assets/font/SugarpunchDEMO.otf');
+  myFont2 = loadFont('assets/font/Poppins-Medium.ttf');
+  
+  leftImageTop = loadImage("assets/cards/Points.png");
+  leftImageBottom = loadImage("assets/cards/Point charts.png");
+
+  // Memuat file audio BGM
+  bgm = loadSound('assets/BGM.mp4');
+
+  let suitMap = { "♠": "J", "♥": "K", "♦": "S", "♣": "M" };
+
+  for (let suit of suits) {
+    for (let def of cardDefs) {
+      let key      = def.label + suit;
+      let filename = def.label + suitMap[suit] + ".png";
+      cardImages[key] = loadImage("assets/cards/" + filename);
+    }
+  }
+
+  backImage = loadImage("assets/cards/BG.png");
+}
+
+// ── Setup & Window Resizing ───────────────────────────────────────────────────────
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  clear();
+  updateCardDimensions();
+  textFont(myFont2);
+  pixelDensity(4);
+  
+  // PERUBAHAN: Musik diputar selalu dari awal (detik 0) saat game dimulai
+  bgm.loop();
+  bgm.setVolume(0.3); 
+
+  // Menghapus data memori pelacakan waktu audio lama agar bersih
+  localStorage.removeItem('bgmTime');
+
+  initGameAssets(); 
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  updateCardDimensions();
+}
+
+function initGameAssets() {
+  deck        = [];
+  discardPile = [];
+  playerHand  = [];
+  aiHand      = [];
+
+  revealAI = false;
+  turn     = "player";
+  message  = "Ambil 1 kartu dari Deck atau Discard Pile";
+
+  createDeck();
+  shuffleDeck();
+
+  dealing     = true;
+  dealQueue   = [];
+  currentDeal = null;
+
+  prepareDeal();
+  discardPile.push(deck.pop());
+
+  gameState = "playing";
+}
+
+// ── Deck creation ───────────────────────────────────────────────
+function createDeck() {
+  deck = [];
+  for (let suit of suits) {
+    for (let def of cardDefs) {
+      let key = def.label + suit;
+      deck.push({
+        suit,
+        label: def.label,
+        icon:  def.icon,
+        score: def.score,
+        img:   cardImages[key],
+        x: 0,
+        y: 0
+      });
+    }
+  }
+}
+
+function shuffleDeck() {
+  for (let i = deck.length - 1; i > 0; i--) {
+    let j = floor(random(i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+}
+
+// ── Score calculation ───────────────────────────────────────────
+function calculateScore(hand) {
+  let suitScores = { "♠": 0, "♥": 0, "♦": 0, "♣": 0 };
+
+  for (let card of hand) {
+    suitScores[card.suit] += card.score;
+  }
+
+  if (hand.length === 4) {
+    let first   = hand[0];
+    let allSame = hand.every(c => c.suit === first.suit && c.icon === first.icon);
+    if (allSame) {
+      suitScores[first.suit] += BONUS_POINTS;
+    }
+  }
+
+  return max(
+    suitScores["♠"],
+    suitScores["♥"],
+    suitScores["♦"],
+    suitScores["♣"]
+  );
+}
+
+function getSuitScore(hand, suit) {
+  let total = 0;
+  for (let card of hand) if (card.suit === suit) total += card.score;
+  return total;
+}
+
+// ── Win condition ───────────────────────────────────────────────
+function checkFinalWinner() {
+  revealAI = true;
+  let playerScore = calculateScore(playerHand);
+  let aiScore     = calculateScore(aiHand);
+
+  if (playerScore > aiScore)
+    message = "KAMU MENANG! " + playerScore + " vs " + aiScore;
+  else if (aiScore > playerScore)
+    message = "AI MENANG! " + aiScore + " vs " + playerScore;
+  else
+    message = "DRAW! " + playerScore + " poin";
+
+  gameState = "gameover";
+  turn = "none";
+}
+
+// ── Draw loop ───────────────────────────────────────────────────
+function draw() {
+  clear();
+
+  drawLeftImages();
+
+  drawDeck();
+  drawDiscard();
+
+  if (!dealing) {
+    drawPlayerHand();
+    drawAIHand();
+  }
+
+  animateDeal();
+  drawUI();
+
+  if (dealing) return;
+
+  if (turn === "ai" && !aiAnimating) {
+    aiAnimating = true;
+    turn = "waiting";
+    setTimeout(aiTurn, 700);
+  }
+
+  if (aiDrawnCard) {
+    drawCard(
+      aiDrawnCard,
+      width / 2 + (width * 0.15),
+      aiY() + 40,
+      true
+    );
+  }
+
+  if (aiDiscardedCard) {
+    drawCard(
+      aiDiscardedCard,
+      discardX(),
+      midY() - 30,
+      true
+    );
+  }
+
+  if (previewCard && (gameState === "playing" || gameState === "gameover")) {
+    drawPreviewCard();
+  }
+
+  if (draggingCard) {
+    drawCard(
+      draggingCard,
+      mouseX - cardW / 2,
+      mouseY - cardH / 2,
+      true
+    );
+  }
+  if (aiAnimation) {
+    let x = lerp(
+      aiAnimation.startX,
+      aiAnimation.endX,
+      aiAnimation.progress
+    );
+
+    let y = lerp(
+      aiAnimation.startY,
+      aiAnimation.endY,
+      aiAnimation.progress
+    );
+
+    drawCard(
+      aiAnimation.card,
+      x,
+      y,
+      aiAnimation.faceUp
+    );
+
+    aiAnimation.progress += 0.08;
+
+    if (aiAnimation.progress >= 1) {
+      finishAIAnimation();
+    }
+  }
+}
+
+// ── Card preview (bottom-right) ─────────────────────────────────
+function drawPreviewCard() {
+  let bigW = cardW * 3;
+  let bigH = cardH * 3;
+  let x = width - bigW - (width * 0.03);
+  let y = height / 2 - bigH / 2;
+
+  drawingContext.shadowColor = "rgba(0,0,0,0.75)";
+  drawingContext.shadowBlur = 45;
+  drawingContext.shadowOffsetX = 18;
+  drawingContext.shadowOffsetY = 22;
+
+  image(previewCard.img, x, y, bigW, bigH);
+
+  drawingContext.shadowColor = "transparent";
+}
+
+// ── Left Side Layout Images ─────────────────────────────────────
+function drawLeftImages() {
+  let maxPanelH = height * 0.46;
+  
+  let topW = leftImageTop.width * (maxPanelH / leftImageTop.height);
+  image(leftImageTop, width * 0.02, height * 0.05, topW, maxPanelH);
+
+  let bottomW = leftImageBottom.width * (maxPanelH / leftImageBottom.height);
+  image(leftImageBottom, width * 0.02, height * 0.52, bottomW, maxPanelH);
+}
+
+// ── Deal animation ──────────────────────────────────────────────
+function prepareDeal() {
+  for (let i = 0; i < 4; i++) {
+    dealQueue.push({ target: "player", card: deck.pop() });
+    dealQueue.push({ target: "ai",     card: deck.pop() });
+  }
+}
+
+// ── Card rendering ──────────────────────────────────────────────
+function animateDeal() {
+  let spacing = cardW * 1.15;
+  if (!currentDeal && dealQueue.length > 0) {
+    let next = dealQueue.shift();
+    currentDeal = { card: next.card, target: next.target, progress: 0 };
+  }
+
+  if (currentDeal) {
+    let targetX, targetY;
+
+    if (currentDeal.target === "player") {
+      targetX = handStartX(playerHand) + playerHand.length * spacing;
+      targetY = playerY();
+    } else {
+      targetX = handStartX(aiHand) + aiHand.length * spacing;
+      targetY = aiY();
+    }
+
+    currentDeal.progress += dealSpeed;
+
+    let x = lerp(deckX(), targetX, currentDeal.progress);
+    let y = lerp(midY(),  targetY, currentDeal.progress);
+
+    drawCard(currentDeal.card, x, y, currentDeal.target === "player");
+
+    if (currentDeal.progress >= 1) {
+      if (currentDeal.target === "player") playerHand.push(currentDeal.card);
+      else                                 aiHand.push(currentDeal.card);
+      currentDeal = null;
+    }
+  }
+
+  if (!currentDeal && dealQueue.length === 0) dealing = false;
+}
+
+function drawCard(card, x, y, faceUp = true) {
+  drawingContext.shadowColor = "rgba(0,0,0,0.6)";
+  drawingContext.shadowBlur = 18;
+  drawingContext.shadowOffsetX = 8;
+  drawingContext.shadowOffsetY = 10;
+
+  if (faceUp) image(card.img, x, y, cardW, cardH);
+  else          image(backImage, x, y, cardW, cardH);
+
+  drawingContext.shadowColor = "transparent";
+}
+
+function drawPlayerHand() {
+  let startX = handStartX(playerHand);
+  let y      = playerY();
+  let spacing = cardW * 1.15;
+
+  for (let i = 0; i < playerHand.length; i++) {
+    if (i === draggingIndex) continue;
+
+    let x = startX + i * spacing;
+    let c = playerHand[i];
+    c.x   = x;
+    c.y   = y;
+
+    let hovering = mouseX > x && mouseX < x + cardW && mouseY > y && mouseY < y + cardH;
+
+    if (hovering) {
+      let zoom = 1.15;
+      let newW = cardW * zoom, newH = cardH * zoom;
+      image(c.img, x - (newW - cardW) / 2, y - (newH - cardH) / 2, newW, newH);
+    } else {
+      drawCard(c, x, y, true);
+    }
+  }
+}
+
+function drawAIHand() {
+  let startX = handStartX(aiHand);
+  let spacing = cardW * 1.15;
+  for (let i = 0; i < aiHand.length; i++) {
+    drawCard(aiHand[i], startX + i * spacing, aiY(), revealAI);
+  }
+}
+
+// ── Deck & discard rendering ────────────────────────────────────
+function drawDeck() {
+  let x = deckX();
+  let y = midY();
+
+  drawingContext.shadowColor = "rgba(0,0,0,0.65)";
+  drawingContext.shadowBlur = 25;
+  drawingContext.shadowOffsetX = 10;
+  drawingContext.shadowOffsetY = 12;
+
+  image(backImage, x, y, cardW, cardH);
+
+  drawingContext.shadowColor = "transparent";
+
+  fill(255);
+  textAlign(CENTER);
+  textSize(14);
+  text(deck.length, x + cardW / 2, y + cardH + 18);
+}
+
+function drawDiscard() {
+  if (discardPile.length > 0)
+    drawCard(discardPile[discardPile.length - 1], discardX(), midY(), true);
+
+  noFill();
+  stroke(255);
+  rect(discardX(), midY(), cardW, cardH);
+  noStroke();
+}
+
+function checkInstantWin() {
+  let playerScore = calculateScore(playerHand);
+  let aiScore = calculateScore(aiHand);
+
+  if (playerScore >= 45) {
+    revealAI = true;
+    message = "KAMU MENANG! (45 poin tercapai)";
+    gameState = "gameover";
+    turn = "none";
+    return true;
+  }
+
+  if (aiScore >= 45) {
+    revealAI = true;
+    message = "AI MENANG! (45 poin tercapai)";
+    gameState = "gameover";
+    turn = "none";
+    return true;
+  }
+
+  return false;
+}
+
+// ── UI text ────────────────────────────────────────────────────
+function drawUI() {
+  fill(255);
+  textAlign(CENTER);
+  textSize(min(width * 0.018, 20));
+  text(message, width / 2, midY() - 25);
+
+  textSize(15);
+  text("Poin Kamu: " + calculateScore(playerHand), width / 2, playerY() + cardH + 20);
+  text("Poin AI: "    + calculateScore(aiHand),     width / 2, aiY() - 15);
+
+  if (playerHand.length === 4) {
+    let first   = playerHand[0];
+    let allSame = playerHand.every(c => c.suit === first.suit && c.icon === first.icon);
+    if (allSame) {
+      fill(255, 220, 50);
+      textSize(16);
+      text("✦ BONUS +5!", width / 2, playerY() + cardH + 42);
+    }
+  }
+
+  // Render Post-Game Navigation Buttons
+  if (gameState === "gameover") {
+    let layout = getEndGameButtonsLayout();
+    textAlign(CENTER, CENTER);
+    textFont(myFont2);
+    textSize(min(width * 0.014, 16));
+
+    // Retry Button ("Main Lagi")
+    fill(230);
+    rect(layout.startX, layout.y, layout.btnW, layout.btnH, 12);
+    fill(0);
+    text("Main Lagi", layout.startX + layout.btnW / 2, layout.y + layout.btnH / 2);
+
+    // Main Menu Button ("Menu Utama")
+    fill(230);
+    rect(layout.startX + layout.btnW + layout.gap, layout.y, layout.btnW, layout.btnH, 12);
+    fill(0);
+    text("Menu Utama", layout.startX + layout.btnW + layout.gap + layout.btnW / 2, layout.y + layout.btnH / 2);
+  }
+}
+
+// ── Mouse input ─────────────────────────────────────────────────
+function mousePressed() {
+  if (getAudioContext().state !== 'running') {
+    getAudioContext().resume();
+  }
+
+  // Handle Menu Actions on Game Over
+  if (gameState === "gameover") {
+    let layout = getEndGameButtonsLayout();
+
+    // Clicked "Main Lagi" (Mulai game baru, musik restart otomatis)
+    if (mouseX > layout.startX && mouseX < layout.startX + layout.btnW &&
+        mouseY > layout.y && mouseY < layout.y + layout.btnH) {
+      
+      bgm.stop(); // Hentikan audio lama
+      bgm.loop(); // Putar ulang lagu dari detik 0
+      initGameAssets();
+      return;
+    }
+
+    // Clicked "Menu Utama" (Kembali ke halaman index.html)
+    if (mouseX > layout.startX + layout.btnW + layout.gap && mouseX < layout.startX + layout.btnW * 2 + layout.gap &&
+        mouseY > layout.y && mouseY < layout.y + layout.btnH) {
+      
+      // PERUBAHAN: Bersihkan localStorage agar menu utama tetap sunyi
+      localStorage.removeItem('bgmTime');
+      window.location.href = "first.html"; 
+      return;
+    }
+  }
+
+  if (dealing)          return;
+  if (turn !== "player") return;
+
+  // Click deck
+  if (mouseX > deckX() && mouseX < deckX() + cardW &&
+      mouseY > midY()   && mouseY < midY() + cardH) {
+    if (deck.length === 0) { checkFinalWinner(); return; }
+    if (playerHand.length >= 5) { message = "Buang 1 kartu dulu!"; return; }
+    playerHand.push(deck.pop());
+    message = "Buang 1 kartu";
+    return;
+  }
+
+  // Click discard pile
+  if (mouseX > discardX() && mouseX < discardX() + cardW &&
+      mouseY > midY()      && mouseY < midY() + cardH) {
+    if (discardPile.length === 0) return;
+    if (playerHand.length >= 5)   { message = "Buang 1 kartu dulu!"; return; }
+    playerHand.push(discardPile.pop());
+    message = "Buang 1 kartu";
+    return;
+  }
+
+  // Start dragging a card from hand
+  for (let i = 0; i < playerHand.length; i++) {
+    let c = playerHand[i];
+    if (mouseX > c.x && mouseX < c.x + cardW &&
+        mouseY > c.y && mouseY < c.y + cardH) {
+      
+      previewCard = c;
+      
+      if (playerHand.length < 5) {
+        message = "Ambil 1 kartu terlebih dahulu!";
+        draggingCard = null;
+        draggingIndex = -1;
+      } else {
+        draggingCard  = c;
+        draggingIndex = i;
+      }
+      break;
+    }
+  }
+}
+
+function mouseReleased() {
+  if (dealing)       return;
+  if (!draggingCard) return;
+
+  if (mouseX > discardX() && mouseX < discardX() + cardW &&
+      mouseY > midY()      && mouseY < midY() + cardH) {
+    discardPile.push(draggingCard);
+    playerHand.splice(draggingIndex, 1);
+    turn    = "ai";
+    message = "Giliran AI";
+  }
+
+  draggingCard  = null;
+  draggingIndex = -1;
+}
+
+// ── AI Animation Handlers ───────────────────────────────────────────────────
+function startAIAnimation(card, startX, startY, endX, endY, action, faceUp = true) {
+  aiAnimation = { card, startX, startY, endX, endY, progress: 0, action, faceUp };
+}
+
+function finishAIAnimation() {
+  if (aiAnimation.action === "draw") {
+    aiHand.push(aiAnimation.card);
+    let drawnCard = aiAnimation.card;
+    aiAnimation = null;
+
+    setTimeout(() => {
+      aiDiscardStep(drawnCard);
+    }, 500);
+
+  } else if (aiAnimation.action === "discard") {
+    discardPile.push(aiAnimation.card);
+    aiAnimation = null;
+
+    if (checkInstantWin()) {
+      aiAnimating = false;
+      return;
+    }
+
+    setTimeout(() => {
+      turn = "player";
+      aiThinking = false;
+      aiAnimating = false;
+      message = "Ambil 1 kartu dari Deck atau Discard Pile";
+    }, 500);
+  }
+}
+
+function aiDiscardStep() {
+  let worstIndex = findWorstCard(aiHand);
+  let discardCard = aiHand[worstIndex];
+  let spacing = cardW * 1.15;
+  let startX = handStartX(aiHand) + worstIndex * spacing;
+  let startY = aiY();
+
+  aiHand.splice(worstIndex, 1);
+  message = "AI membuang kartu...";
+
+  startAIAnimation(
+    discardCard,
+    startX,
+    startY,
+    discardX(),
+    midY(),
+    "discard"
+  );
+}
+
+// ── AI Logic ────────────────────────────────────────────────────
+function aiTurn() {
+  if (deck.length === 0 && discardPile.length === 0) {
+    checkFinalWinner();
+    return;
+  }
+
+  let topDiscard = discardPile[discardPile.length - 1];
+  let bestSuit = getBestSuit(aiHand);
+  let takeDiscard = false;
+
+  if (topDiscard) {
+    let simulatedHand = [...aiHand, topDiscard];
+    let improvesScore = getSuitScore(simulatedHand, bestSuit) > getSuitScore(aiHand, bestSuit);
+    let getsBonus = wouldCompleteBonus(aiHand, topDiscard);
+
+    if (improvesScore || getsBonus) {
+      takeDiscard = true;
+    }
+  }
+
+  let drawnCard;
+  let startX;
+  let startY;
+
+  if (takeDiscard && discardPile.length > 0) {
+    drawnCard = discardPile.pop();
+    startX = discardX();
+    startY = midY();
+  } else {
+    drawnCard = deck.pop();
+    startX = deckX();
+    startY = midY();
+  }
+
+  message = "AI mengambil kartu...";
+  let faceUp = takeDiscard;
+  let spacing = cardW * 1.15;
+
+  startAIAnimation(
+    drawnCard,
+    startX,
+    startY,
+    handStartX(aiHand) + aiHand.length * spacing,
+    aiY(),
+    "draw",
+    faceUp
+  );
+}
+
+function wouldCompleteBonus(hand, candidate) {
+  if (hand.length !== 3) return false;
+  return hand.every(c => c.suit === candidate.suit && c.icon === candidate.icon);
+}
+
+function getBestSuit(hand) {
+  let suitScores = { "♠": 0, "♥": 0, "♦": 0, "♣": 0 };
+  for (let card of hand) {
+    suitScores[card.suit] += card.score;
+  }
+
+  let bestSuit = suits[0];
+  for (let suit of suits) {
+    if (suitScores[suit] > suitScores[bestSuit]) {
+      bestSuit = suit;
+    }
+  }
+  return bestSuit;
+}
+
+function findWorstCard(hand) {
+  let bestSuit = getBestSuit(hand);
+  let worstIndex = -1;
+  let lowestScore = 999;
+
+  for (let i = 0; i < hand.length; i++) {
+    if (hand[i].suit !== bestSuit && hand[i].score < lowestScore) {
+      lowestScore = hand[i].score;
+      worstIndex = i;
+    }
+  }
+
+  if (worstIndex === -1) {
+    worstIndex = 0;
+    for (let i = 1; i < hand.length; i++) {
+      if (hand[i].score < hand[worstIndex].score) {
+        worstIndex = i;
+      }
+    }
+  }
+  return worstIndex;
+}
+  </script>
+</body>
+</html>
