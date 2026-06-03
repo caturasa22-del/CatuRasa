@@ -78,18 +78,29 @@ let bgm;
 
 // ── Responsive Layout Helpers ──────────────────────────────────────────────
 function updateCardDimensions() {
-  cardH = min(height * 0.23, 160);
+  // Scales cards dynamically based on screen size (keeps standard card ratio)
+  cardH = min(height * 0.22, width * 0.18, 160);
   cardW = cardH * 0.66;
 }
 
-function deckX()    { return width / 2 - cardW - (width * 0.04); }
-function discardX() { return width / 2 + (width * 0.04);  }
+function deckX()    { return width / 2 - cardW - (width * 0.05); }
+function discardX() { return width / 2 + (width * 0.05);  }
 function midY()     { return height / 2 - cardH / 2; }
-function playerY()  { return height - cardH - (height * 0.08); }
-function aiY()      { return height * 0.08; }
+function playerY()  { return height - cardH - (height * 0.06); }
+function aiY()      { return height * 0.06; }
+
+// Calculates layout spacing intelligently so cards never leave the screen boundaries
+function getHandSpacing(handLength) {
+  let standardSpacing = cardW * 1.15;
+  let availableWidth = width * 0.55; // Constrain the hand width space
+  if (handLength * standardSpacing > availableWidth) {
+    return availableWidth / handLength;
+  }
+  return standardSpacing;
+}
 
 function handStartX(hand) {
-  let spacing = cardW * 1.15;
+  let spacing = getHandSpacing(hand.length);
   let totalW = hand.length * spacing - (spacing - cardW);
   return width / 2 - totalW / 2;
 }
@@ -351,7 +362,7 @@ function draw() {
 
 // ── Card preview (bottom-right) ─────────────────────────────────
 function drawPreviewCard() {
-  let bigW = cardW * 3;
+  let bigW = cardW * 3; // Adjusted preview multiplier to fit scaled screens cleanly
   let bigH = cardH * 3;
   let x = width - bigW - (width * 0.03);
   let y = height / 2 - bigH / 2;
@@ -368,7 +379,7 @@ function drawPreviewCard() {
 
 // ── Left Side Layout Images ─────────────────────────────────────
 function drawLeftImages() {
-  let maxPanelH = height * 0.46;
+  let maxPanelH = height * 0.43;
   
   let topW = leftImageTop.width * (maxPanelH / leftImageTop.height);
   image(leftImageTop, width * 0.02, height * 0.05, topW, maxPanelH);
@@ -387,7 +398,6 @@ function prepareDeal() {
 
 // ── Card rendering ──────────────────────────────────────────────
 function animateDeal() {
-  let spacing = cardW * 1.15;
   if (!currentDeal && dealQueue.length > 0) {
     let next = dealQueue.shift();
     currentDeal = { card: next.card, target: next.target, progress: 0 };
@@ -395,12 +405,14 @@ function animateDeal() {
 
   if (currentDeal) {
     let targetX, targetY;
-
+    
     if (currentDeal.target === "player") {
-      targetX = handStartX(playerHand) + playerHand.length * spacing;
+      let spacing = getHandSpacing(playerHand.length + 1);
+      targetX = handStartX([...playerHand, currentDeal.card]) + playerHand.length * spacing;
       targetY = playerY();
     } else {
-      targetX = handStartX(aiHand) + aiHand.length * spacing;
+      let spacing = getHandSpacing(aiHand.length + 1);
+      targetX = handStartX([...aiHand, currentDeal.card]) + aiHand.length * spacing;
       targetY = aiY();
     }
 
@@ -436,7 +448,7 @@ function drawCard(card, x, y, faceUp = true) {
 function drawPlayerHand() {
   let startX = handStartX(playerHand);
   let y      = playerY();
-  let spacing = cardW * 1.15;
+  let spacing = getHandSpacing(playerHand.length);
 
   for (let i = 0; i < playerHand.length; i++) {
     if (i === draggingIndex) continue;
@@ -449,7 +461,7 @@ function drawPlayerHand() {
     let hovering = mouseX > x && mouseX < x + cardW && mouseY > y && mouseY < y + cardH;
 
     if (hovering) {
-      let zoom = 1.15;
+      let zoom = 1.12;
       let newW = cardW * zoom, newH = cardH * zoom;
       image(c.img, x - (newW - cardW) / 2, y - (newH - cardH) / 2, newW, newH);
     } else {
@@ -460,7 +472,7 @@ function drawPlayerHand() {
 
 function drawAIHand() {
   let startX = handStartX(aiHand);
-  let spacing = cardW * 1.15;
+  let spacing = getHandSpacing(aiHand.length);
   for (let i = 0; i < aiHand.length; i++) {
     drawCard(aiHand[i], startX + i * spacing, aiY(), revealAI);
   }
@@ -688,7 +700,7 @@ function finishAIAnimation() {
 function aiDiscardStep() {
   let worstIndex = findWorstCard(aiHand);
   let discardCard = aiHand[worstIndex];
-  let spacing = cardW * 1.15;
+  let spacing = getHandSpacing(aiHand.length);
   let startX = handStartX(aiHand) + worstIndex * spacing;
   let startY = aiY();
 
@@ -742,13 +754,13 @@ function aiTurn() {
 
   message = "AI mengambil kartu...";
   let faceUp = takeDiscard;
-  let spacing = cardW * 1.15;
+  let spacing = getHandSpacing(aiHand.length + 1);
 
   startAIAnimation(
     drawnCard,
     startX,
     startY,
-    handStartX(aiHand) + aiHand.length * spacing,
+    handStartX([...aiHand, drawnCard]) + aiHand.length * spacing,
     aiY(),
     "draw",
     faceUp
